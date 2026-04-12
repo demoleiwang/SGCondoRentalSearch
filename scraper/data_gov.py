@@ -176,7 +176,7 @@ def build_99co_url(project_name: str = "", location: str = "",
     """Build 99.co search URL for a specific condo or area."""
     base = "https://www.99.co/singapore/rent/condos-apartments"
     params = []
-    query = project_name or location
+    query = project_name.title() if project_name else location
     if query:
         params.append(f"query={requests.utils.quote(query)}")
     if bedrooms is not None:
@@ -197,7 +197,7 @@ def build_propertyguru_url(project_name: str = "", location: str = "",
     """Build PropertyGuru search URL."""
     base = "https://www.propertyguru.com.sg/property-for-rent"
     params = ["market=residential", "property_type=C"]
-    query = project_name or location
+    query = project_name.title() if project_name else location
     if query:
         params.append(f"freetext={requests.utils.quote(query)}")
     if bedrooms is not None:
@@ -207,3 +207,7 @@ def build_propertyguru_url(project_name: str = "", location: str = "",
     if price_max is not None:
         params.append(f"maxprice={price_max}")
     return f"{base}?{'&'.join(params)}"
+
+
+# URA rental search URL (working as of 2025)
+URA_RENTAL_SEARCH_URL = "https://www.ura.gov.sg/realEstateIIWeb/rental/search.action"

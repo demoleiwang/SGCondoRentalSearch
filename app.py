@@ -149,7 +149,7 @@ st.sidebar.markdown("**Browse live listings:**")
 url_99 = build_99co_url(location=location_query)
 url_pg = build_propertyguru_url(location=location_query)
 st.sidebar.markdown(f"[🔗 99.co]({url_99}) | [🔗 PropertyGuru]({url_pg})")
-st.sidebar.markdown("[📊 URA Rental](https://www.ura.gov.sg/property-market-information/pmiResidentialRentalSearch) | [🏡 SRX](https://www.srx.com.sg/)")
+st.sidebar.markdown("[📊 URA Rental](https://www.ura.gov.sg/realEstateIIWeb/rental/search.action) | [🏡 SRX](https://www.srx.com.sg/)")
 
 # =========================================================================
 # MAIN CONTENT
@@ -231,7 +231,7 @@ if search_clicked or nl_query:
                 f"{rank} **{strat.station}** ({strat.distance_m}m) — {len(strat_results)} condos | {strat.reason}",
                 expanded=(i < 3),
             ):
-                ura_url = "https://www.ura.gov.sg/property-market-information/pmiResidentialRentalSearch"
+                ura_url = "https://www.ura.gov.sg/realEstateIIWeb/rental/search.action"
                 for r in strat_results[:5]:
                     st.markdown(
                         f"**{r.project_name}** — ${r.est_rent:,}/mo "

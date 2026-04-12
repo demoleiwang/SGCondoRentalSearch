@@ -28,6 +28,7 @@ from scraper.hdb import (
     fetch_hdb_rental_data, aggregate_hdb_by_town, aggregate_hdb_data,
     get_towns_for_mrt, FLAT_TYPE_MAP,
 )
+from commute import Location, analyze_commute, generate_queries, format_analysis_report
 
 # --- Page Config ---
 st.set_page_config(
@@ -75,6 +76,14 @@ if nl_query:
         st.info(f"📋 Parsed: **{criteria_to_display(nl_criteria)}**")
 
 # --- Sidebar ---
+# Search mode
+search_mode = st.sidebar.radio(
+    "Mode",
+    ["🔍 Search", "🚇 Smart Commute"],
+    horizontal=True,
+    help="Smart Commute: find optimal areas based on your school/office locations",
+)
+
 st.sidebar.header("🔧 Filters")
 
 # Property type toggle
@@ -151,7 +160,190 @@ st.sidebar.markdown(f"[🔗 99.co]({url_99}) | [🔗 PropertyGuru]({url_pg})")
 st.sidebar.markdown("[📊 URA Rental](https://www.ura.gov.sg/property-market-information/pmiResidentialRentalSearch) | [🏡 SRX](https://www.srx.com.sg/)")
 
 # =========================================================================
-# MAIN CONTENT
+# SMART COMMUTE MODE
+# =========================================================================
+if search_mode == "🚇 Smart Commute":
+    st.subheader("🚇 Smart Commute Search")
+    st.caption("Enter your daily destinations — we'll find the best areas to live.")
+
+    # Input form
+    with st.form("commute_form"):
+        st.markdown("**Your Destinations** (enter at least 2)")
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            loc1_name = st.text_input("Label 1", value="School", key="loc1_name")
+            loc1_addr = st.text_input("Address 1", placeholder="e.g. Singapore Management University", key="loc1_addr")
+        with fc2:
+            loc2_name = st.text_input("Label 2", value="Office", key="loc2_name")
+            loc2_addr = st.text_input("Address 2", placeholder="e.g. OUE Downtown One", key="loc2_addr")
+
+        # Optional 3rd location
+        with st.expander("Add a 3rd destination (optional)"):
+            fc3a, fc3b = st.columns(2)
+            with fc3a:
+                loc3_name = st.text_input("Label 3", value="", key="loc3_name")
+            with fc3b:
+                loc3_addr = st.text_input("Address 3", value="", key="loc3_addr")
+
+        st.markdown("**Rental Preferences**")
+        pc1, pc2, pc3 = st.columns(3)
+        with pc1:
+            smart_bedrooms = st.selectbox("Bedrooms", [1, 2, 3, 0],
+                                          format_func=lambda x: "Studio" if x == 0 else f"{x}BR",
+                                          key="smart_beds")
+        with pc2:
+            smart_budget = st.slider("Budget (SGD/mo)", 1500, 10000, (2500, 4000), 100,
+                                     key="smart_budget")
+        with pc3:
+            smart_extra = st.text_input("Extra criteria", placeholder="e.g. south facing, high floor",
+                                        key="smart_extra")
+
+        smart_submitted = st.form_submit_button("🚇 Analyze Commute & Search", type="primary",
+                                                 use_container_width=True)
+
+    if smart_submitted and loc1_addr and loc2_addr:
+        # Build locations
+        locations = [
+            Location(name=loc1_name, address=loc1_addr),
+            Location(name=loc2_name, address=loc2_addr),
+        ]
+        if loc3_name and loc3_addr:
+            locations.append(Location(name=loc3_name, address=loc3_addr))
+
+        with st.spinner("Geocoding destinations & analyzing MRT network..."):
+            scored_stations = analyze_commute(locations)
+
+        if not scored_stations:
+            st.error("Could not analyze commute. Please check your addresses.")
+        else:
+            queries = generate_queries(
+                scored_stations,
+                bedrooms=smart_bedrooms,
+                price_min=smart_budget[0],
+                price_max=smart_budget[1],
+                extra_criteria=smart_extra,
+                max_queries=10,
+            )
+
+            # --- Destination Info ---
+            st.markdown("### 📍 Your Destinations")
+            dest_cols = st.columns(len(locations))
+            for i, loc in enumerate(locations):
+                with dest_cols[i]:
+                    if loc.nearby_stations:
+                        nearest = loc.nearby_stations[0]
+                        st.metric(loc.name, f"{nearest[0]} MRT", f"{int(nearest[1])}m away")
+                    else:
+                        st.metric(loc.name, "N/A")
+
+            # --- Map ---
+            st.markdown("### 🗺️ Recommended Areas")
+            center_lat = sum(loc.lat for loc in locations) / len(locations)
+            center_lng = sum(loc.lng for loc in locations) / len(locations)
+            m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="CartoDB positron")
+
+            # Destination markers (red)
+            for loc in locations:
+                if loc.lat and loc.lng:
+                    folium.Marker(
+                        [loc.lat, loc.lng],
+                        popup=f"📍 {loc.name}: {loc.address}",
+                        tooltip=f"📍 {loc.name}",
+                        icon=folium.Icon(color="red", icon="star", prefix="fa"),
+                    ).add_to(m)
+
+            # Recommended station markers
+            for i, q in enumerate(queries):
+                s_info = find_station(q["station"])
+                if s_info:
+                    # Color by rank
+                    color = "green" if i < 3 else ("blue" if i < 6 else "lightgray")
+                    commute_lines = []
+                    for loc_name, det in q["commute"].items():
+                        dist_km = det["distance_m"] / 1000
+                        direct = "direct" if det["direct_lines"] else "1 transfer"
+                        commute_lines.append(f"{loc_name}: {dist_km:.1f}km ({direct})")
+                    popup_html = f"""
+                    <div style="min-width:220px;">
+                        <b>#{i+1} {q['station']}</b> ({'/'.join(q['lines'])})<br>
+                        {'<br>'.join(commute_lines)}<br>
+                        💰 Query: {q['query_text']}
+                    </div>
+                    """
+                    folium.Marker(
+                        [s_info["lat"], s_info["lng"]],
+                        popup=folium.Popup(popup_html, max_width=300),
+                        tooltip=f"#{i+1} {q['station']}",
+                        icon=folium.Icon(color=color, icon="home", prefix="fa"),
+                    ).add_to(m)
+
+            st_folium(m, width=None, height=500, use_container_width=True)
+
+            # --- Run queries against condo data ---
+            st.markdown("### 📋 Search Results by Area")
+            with st.spinner("Loading rental data..."):
+                try:
+                    condo_df = load_condo_data()
+                except Exception:
+                    condo_df = pd.DataFrame()
+
+            for i, q in enumerate(queries):
+                rent_col = f"est_rent_{smart_bedrooms}br"
+                # Filter condo data for this station's districts
+                if q["districts"] and not condo_df.empty and rent_col in condo_df.columns:
+                    area_df = condo_df[
+                        (condo_df["postal_district"].isin(q["districts"])) &
+                        (condo_df[rent_col] >= smart_budget[0]) &
+                        (condo_df[rent_col] <= smart_budget[1])
+                    ].sort_values(rent_col)
+                    count = len(area_df)
+                else:
+                    area_df = pd.DataFrame()
+                    count = 0
+
+                # Commute summary
+                commute_parts = []
+                for loc_name, det in q["commute"].items():
+                    dist_km = det["distance_m"] / 1000
+                    if det["direct_lines"]:
+                        commute_parts.append(f"→ {loc_name}: {dist_km:.1f}km (direct via {'/'.join(det['direct_lines'])})")
+                    else:
+                        commute_parts.append(f"→ {loc_name}: {dist_km:.1f}km (1 transfer)")
+
+                rank_emoji = "🥇" if i == 0 else ("🥈" if i == 1 else ("🥉" if i == 2 else f"#{i+1}"))
+                with st.expander(f"{rank_emoji} **{q['station']}** — {count} condos | {' | '.join(commute_parts)}", expanded=(i < 3)):
+                    st.caption(f"Lines: {', '.join(q['lines'])} | Query: `{q['query_text']}`")
+
+                    if not area_df.empty:
+                        typical_size = TYPICAL_SIZES.get(smart_bedrooms, 530)
+                        for _, row in area_df.head(5).iterrows():
+                            est_rent = int(row[rent_col])
+                            url_p = build_99co_url(project_name=row["project_name"], bedrooms=smart_bedrooms,
+                                                    price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15))
+                            st.markdown(
+                                f"**{row['project_name']}** — ${est_rent:,}/mo "
+                                f"(median ${row['median_psf']:.2f} psf, {int(row['rental_contracts'])} contracts) "
+                                f"[99.co]({url_p})"
+                            )
+                        if len(area_df) > 5:
+                            st.caption(f"... and {len(area_df) - 5} more condos in this area")
+                    else:
+                        url_area = build_99co_url(location=q["station"], bedrooms=smart_bedrooms,
+                                                   price_min=smart_budget[0], price_max=smart_budget[1])
+                        st.markdown(f"No condo data for this district. [Browse on 99.co]({url_area})")
+
+            # --- Summary ---
+            st.markdown("---")
+            st.markdown(format_analysis_report(locations, queries))
+
+    elif smart_submitted:
+        st.warning("Please enter at least 2 destination addresses.")
+
+    # Stop here for smart commute mode - don't show regular search UI below
+    st.stop()
+
+# =========================================================================
+# REGULAR SEARCH MODE
 # =========================================================================
 if search_clicked or nl_query:
     target_station = nl_criteria.get("mrt_station") or (selected_station if selected_station != "(Any)" else None)

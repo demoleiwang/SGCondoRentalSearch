@@ -28,7 +28,7 @@ from scraper.hdb import (
     fetch_hdb_rental_data, aggregate_hdb_by_town, aggregate_hdb_data,
     get_towns_for_mrt, FLAT_TYPE_MAP,
 )
-from commute import Location, analyze_commute, generate_queries, format_analysis_report
+from smart_search import expand_query, detect_landmark
 
 # --- Page Config ---
 st.set_page_config(
@@ -76,14 +76,6 @@ if nl_query:
         st.info(f"📋 Parsed: **{criteria_to_display(nl_criteria)}**")
 
 # --- Sidebar ---
-# Search mode
-search_mode = st.sidebar.radio(
-    "Mode",
-    ["🔍 Search", "🚇 Smart Commute"],
-    horizontal=True,
-    help="Smart Commute: find optimal areas based on your school/office locations",
-)
-
 st.sidebar.header("🔧 Filters")
 
 # Property type toggle
@@ -160,468 +152,380 @@ st.sidebar.markdown(f"[🔗 99.co]({url_99}) | [🔗 PropertyGuru]({url_pg})")
 st.sidebar.markdown("[📊 URA Rental](https://www.ura.gov.sg/property-market-information/pmiResidentialRentalSearch) | [🏡 SRX](https://www.srx.com.sg/)")
 
 # =========================================================================
-# SMART COMMUTE MODE
-# =========================================================================
-if search_mode == "🚇 Smart Commute":
-    st.subheader("🚇 Smart Commute Search")
-    st.caption("Enter your daily destinations — we'll find the best areas to live.")
-
-    # Input form
-    with st.form("commute_form"):
-        st.markdown("**Your Destinations** (enter at least 2)")
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            loc1_name = st.text_input("Label 1", value="School", key="loc1_name")
-            loc1_addr = st.text_input("Address 1", placeholder="e.g. Singapore Management University", key="loc1_addr")
-        with fc2:
-            loc2_name = st.text_input("Label 2", value="Office", key="loc2_name")
-            loc2_addr = st.text_input("Address 2", placeholder="e.g. OUE Downtown One", key="loc2_addr")
-
-        # Optional 3rd location
-        with st.expander("Add a 3rd destination (optional)"):
-            fc3a, fc3b = st.columns(2)
-            with fc3a:
-                loc3_name = st.text_input("Label 3", value="", key="loc3_name")
-            with fc3b:
-                loc3_addr = st.text_input("Address 3", value="", key="loc3_addr")
-
-        st.markdown("**Rental Preferences**")
-        pc1, pc2, pc3 = st.columns(3)
-        with pc1:
-            smart_bedrooms = st.selectbox("Bedrooms", [1, 2, 3, 0],
-                                          format_func=lambda x: "Studio" if x == 0 else f"{x}BR",
-                                          key="smart_beds")
-        with pc2:
-            smart_budget = st.slider("Budget (SGD/mo)", 1500, 10000, (2500, 4000), 100,
-                                     key="smart_budget")
-        with pc3:
-            smart_extra = st.text_input("Extra criteria", placeholder="e.g. south facing, high floor",
-                                        key="smart_extra")
-
-        smart_submitted = st.form_submit_button("🚇 Analyze Commute & Search", type="primary",
-                                                 use_container_width=True)
-
-    if smart_submitted and loc1_addr and loc2_addr:
-        # Build locations
-        locations = [
-            Location(name=loc1_name, address=loc1_addr),
-            Location(name=loc2_name, address=loc2_addr),
-        ]
-        if loc3_name and loc3_addr:
-            locations.append(Location(name=loc3_name, address=loc3_addr))
-
-        with st.spinner("Geocoding destinations & analyzing MRT network..."):
-            scored_stations = analyze_commute(locations)
-
-        if not scored_stations:
-            st.error("Could not analyze commute. Please check your addresses.")
-        else:
-            queries = generate_queries(
-                scored_stations,
-                bedrooms=smart_bedrooms,
-                price_min=smart_budget[0],
-                price_max=smart_budget[1],
-                extra_criteria=smart_extra,
-                max_queries=10,
-            )
-
-            # --- Destination Info ---
-            st.markdown("### 📍 Your Destinations")
-            dest_cols = st.columns(len(locations))
-            for i, loc in enumerate(locations):
-                with dest_cols[i]:
-                    if loc.nearby_stations:
-                        nearest = loc.nearby_stations[0]
-                        st.metric(loc.name, f"{nearest[0]} MRT", f"{int(nearest[1])}m away")
-                    else:
-                        st.metric(loc.name, "N/A")
-
-            # --- Map ---
-            st.markdown("### 🗺️ Recommended Areas")
-            center_lat = sum(loc.lat for loc in locations) / len(locations)
-            center_lng = sum(loc.lng for loc in locations) / len(locations)
-            m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="CartoDB positron")
-
-            # Destination markers (red)
-            for loc in locations:
-                if loc.lat and loc.lng:
-                    folium.Marker(
-                        [loc.lat, loc.lng],
-                        popup=f"📍 {loc.name}: {loc.address}",
-                        tooltip=f"📍 {loc.name}",
-                        icon=folium.Icon(color="red", icon="star", prefix="fa"),
-                    ).add_to(m)
-
-            # Recommended station markers
-            for i, q in enumerate(queries):
-                s_info = find_station(q["station"])
-                if s_info:
-                    # Color by rank
-                    color = "green" if i < 3 else ("blue" if i < 6 else "lightgray")
-                    commute_lines = []
-                    for loc_name, det in q["commute"].items():
-                        dist_km = det["distance_m"] / 1000
-                        direct = "direct" if det["direct_lines"] else "1 transfer"
-                        commute_lines.append(f"{loc_name}: {dist_km:.1f}km ({direct})")
-                    popup_html = f"""
-                    <div style="min-width:220px;">
-                        <b>#{i+1} {q['station']}</b> ({'/'.join(q['lines'])})<br>
-                        {'<br>'.join(commute_lines)}<br>
-                        💰 Query: {q['query_text']}
-                    </div>
-                    """
-                    folium.Marker(
-                        [s_info["lat"], s_info["lng"]],
-                        popup=folium.Popup(popup_html, max_width=300),
-                        tooltip=f"#{i+1} {q['station']}",
-                        icon=folium.Icon(color=color, icon="home", prefix="fa"),
-                    ).add_to(m)
-
-            st_folium(m, width=None, height=500, use_container_width=True)
-
-            # --- Run queries against condo data ---
-            st.markdown("### 📋 Search Results by Area")
-            with st.spinner("Loading rental data..."):
-                try:
-                    condo_df = load_condo_data()
-                except Exception:
-                    condo_df = pd.DataFrame()
-
-            for i, q in enumerate(queries):
-                rent_col = f"est_rent_{smart_bedrooms}br"
-                # Filter condo data for this station's districts
-                if q["districts"] and not condo_df.empty and rent_col in condo_df.columns:
-                    area_df = condo_df[
-                        (condo_df["postal_district"].isin(q["districts"])) &
-                        (condo_df[rent_col] >= smart_budget[0]) &
-                        (condo_df[rent_col] <= smart_budget[1])
-                    ].sort_values(rent_col)
-                    count = len(area_df)
-                else:
-                    area_df = pd.DataFrame()
-                    count = 0
-
-                # Commute summary
-                commute_parts = []
-                for loc_name, det in q["commute"].items():
-                    dist_km = det["distance_m"] / 1000
-                    if det["direct_lines"]:
-                        commute_parts.append(f"→ {loc_name}: {dist_km:.1f}km (direct via {'/'.join(det['direct_lines'])})")
-                    else:
-                        commute_parts.append(f"→ {loc_name}: {dist_km:.1f}km (1 transfer)")
-
-                rank_emoji = "🥇" if i == 0 else ("🥈" if i == 1 else ("🥉" if i == 2 else f"#{i+1}"))
-                with st.expander(f"{rank_emoji} **{q['station']}** — {count} condos | {' | '.join(commute_parts)}", expanded=(i < 3)):
-                    st.caption(f"Lines: {', '.join(q['lines'])} | Query: `{q['query_text']}`")
-
-                    if not area_df.empty:
-                        typical_size = TYPICAL_SIZES.get(smart_bedrooms, 530)
-                        for _, row in area_df.head(5).iterrows():
-                            est_rent = int(row[rent_col])
-                            url_p = build_99co_url(project_name=row["project_name"], bedrooms=smart_bedrooms,
-                                                    price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15))
-                            st.markdown(
-                                f"**{row['project_name']}** — ${est_rent:,}/mo "
-                                f"(median ${row['median_psf']:.2f} psf, {int(row['rental_contracts'])} contracts) "
-                                f"[99.co]({url_p})"
-                            )
-                        if len(area_df) > 5:
-                            st.caption(f"... and {len(area_df) - 5} more condos in this area")
-                    else:
-                        url_area = build_99co_url(location=q["station"], bedrooms=smart_bedrooms,
-                                                   price_min=smart_budget[0], price_max=smart_budget[1])
-                        st.markdown(f"No condo data for this district. [Browse on 99.co]({url_area})")
-
-            # --- Summary ---
-            st.markdown("---")
-            st.markdown(format_analysis_report(locations, queries))
-
-    elif smart_submitted:
-        st.warning("Please enter at least 2 destination addresses.")
-
-    # Stop here for smart commute mode - don't show regular search UI below
-    st.stop()
-
-# =========================================================================
-# REGULAR SEARCH MODE
+# MAIN CONTENT
 # =========================================================================
 if search_clicked or nl_query:
-    target_station = nl_criteria.get("mrt_station") or (selected_station if selected_station != "(Any)" else None)
-    station_info = find_station(target_station) if target_station else None
+    # --- Smart Expand: auto-detect landmarks and expand into multi-area search ---
+    smart_result = expand_query(nl_query or "") if nl_query else None
 
-    # Map setup
-    center_lat, center_lng = SG_CENTER
-    zoom = 12
-    if station_info:
-        center_lat, center_lng = station_info["lat"], station_info["lng"]
-        zoom = 14
+    if smart_result and len(smart_result.strategies) > 1:
+        # ============ SMART EXPAND RESULTS ============
+        sr = smart_result
+        st.success(f"🧠 Smart Search: detected **{sr.landmark_name.upper()}** — expanded to {len(sr.strategies)} nearby areas")
 
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=zoom, tiles="CartoDB positron")
+        # Metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Search Strategies", len(sr.strategies))
+        with col2:
+            st.metric("Total Condos Found", len(sr.results))
+        with col3:
+            if sr.results:
+                rents = [r.est_rent for r in sr.results]
+                st.metric("Rent Range", f"${min(rents):,} - ${max(rents):,}")
 
-    # MRT marker
-    if station_info:
-        folium.Marker(
-            [station_info["lat"], station_info["lng"]],
-            popup=f"🚇 {station_info['name']} MRT ({station_info['code']})",
-            tooltip=f"🚇 {station_info['name']} MRT",
-            icon=folium.Icon(color="red", icon="train", prefix="fa"),
-        ).add_to(m)
-        folium.Circle(
-            [station_info["lat"], station_info["lng"]],
-            radius=DEFAULT_RADIUS_M, color="red", fill=True, fill_opacity=0.05, weight=1,
-        ).add_to(m)
+        # Map with landmark + all strategy stations
+        st.subheader("📍 Map")
+        if sr.landmark_coords:
+            clat, clng = sr.landmark_coords
+        else:
+            clat, clng = SG_CENTER
+        m = folium.Map(location=[clat, clng], zoom_start=14, tiles="CartoDB positron")
 
-    # ==== CONDO TAB / HDB TAB ====
-    if show_condo and show_hdb:
-        tab_condo, tab_hdb = st.tabs(["🏢 Condo", "🏘️ HDB"])
-    elif show_condo:
-        tab_condo = st.container()
-        tab_hdb = None
+        # Landmark marker
+        if sr.landmark_coords:
+            folium.Marker(
+                [sr.landmark_coords[0], sr.landmark_coords[1]],
+                popup=f"📍 {sr.landmark_name.upper()}: {sr.landmark_address}",
+                tooltip=f"📍 {sr.landmark_name.upper()}",
+                icon=folium.Icon(color="red", icon="star", prefix="fa"),
+            ).add_to(m)
+
+        # Strategy station markers
+        for i, strat in enumerate(sr.strategies):
+            s_info = find_station(strat.station)
+            if s_info:
+                color = "green" if i < 3 else ("blue" if i < 6 else "lightgray")
+                popup_html = f"""
+                <div style="min-width:200px;">
+                    <b>#{i+1} {strat.station}</b> ({strat.distance_m}m)<br>
+                    {strat.reason}<br>
+                    Query: {strat.query_text}
+                </div>
+                """
+                folium.Marker(
+                    [s_info["lat"], s_info["lng"]],
+                    popup=folium.Popup(popup_html, max_width=300),
+                    tooltip=f"#{i+1} {strat.station} ({strat.distance_m}m)",
+                    icon=folium.Icon(color=color, icon="home", prefix="fa"),
+                ).add_to(m)
+
+        st_folium(m, width=None, height=500, use_container_width=True)
+
+        # Results grouped by strategy
+        st.subheader(f"📋 Results by Area ({len(sr.results)} condos)")
+        bedrooms_smart = nl_criteria.get("bedrooms", 1)
+
+        for i, strat in enumerate(sr.strategies):
+            strat_results = [r for r in sr.results if r.strategy_name == strat.name]
+            if not strat_results:
+                continue
+            rank = "🥇" if i == 0 else ("🥈" if i == 1 else ("🥉" if i == 2 else f"#{i+1}"))
+            with st.expander(
+                f"{rank} **{strat.station}** ({strat.distance_m}m) — {len(strat_results)} condos | {strat.reason}",
+                expanded=(i < 3),
+            ):
+                for r in strat_results[:5]:
+                    st.markdown(
+                        f"**{r.project_name}** — ${r.est_rent:,}/mo "
+                        f"(${r.median_psf:.2f} psf, {r.contracts} contracts) "
+                        f"[99.co]({r.url_99co})"
+                    )
+                if len(strat_results) > 5:
+                    st.caption(f"... and {len(strat_results) - 5} more")
+
+        # Full data table
+        with st.expander("📊 Full Data Table"):
+            if sr.results:
+                import pandas as _pd
+                rows = [{"Project": r.project_name, "Area": r.strategy_name,
+                         f"Est {bedrooms_smart}BR Rent": r.est_rent,
+                         "Median PSF": r.median_psf, "Contracts": r.contracts}
+                        for r in sr.results]
+                st.dataframe(_pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        # Summary
+        with st.expander("🧠 Analysis Summary"):
+            st.markdown(sr.summary)
+
     else:
-        tab_condo = None
-        tab_hdb = st.container()
+        # ============ REGULAR SEARCH (no landmark detected) ============
+        target_station = nl_criteria.get("mrt_station") or (selected_station if selected_station != "(Any)" else None)
+        station_info = find_station(target_station) if target_station else None
 
-    # ======================== CONDO ========================
-    if show_condo:
-        with tab_condo:
-            with st.spinner("Loading condo data..."):
-                try:
-                    condo_df = load_condo_data()
-                except Exception as e:
-                    st.error(f"Failed to load condo data: {e}")
-                    condo_df = pd.DataFrame()
+        # Map setup
+        center_lat, center_lng = SG_CENTER
+        zoom = 12
+        if station_info:
+            center_lat, center_lng = station_info["lat"], station_info["lng"]
+            zoom = 14
 
-            if not condo_df.empty:
-                # Filter by district
-                target_districts = get_districts_for_mrt(target_station) if target_station else []
-                if target_districts:
-                    filtered_condo = condo_df[condo_df["postal_district"].isin(target_districts)].copy()
-                else:
-                    filtered_condo = condo_df.copy()
+        m = folium.Map(location=[center_lat, center_lng], zoom_start=zoom, tiles="CartoDB positron")
 
-                # Filter by estimated rent
-                rent_col = f"est_rent_{condo_bedrooms}br"
-                if rent_col in filtered_condo.columns:
-                    filtered_condo = filtered_condo[
-                        (filtered_condo[rent_col] >= condo_price[0]) &
-                        (filtered_condo[rent_col] <= condo_price[1])
+        # MRT marker
+        if station_info:
+            folium.Marker(
+                [station_info["lat"], station_info["lng"]],
+                popup=f"🚇 {station_info['name']} MRT ({station_info['code']})",
+                tooltip=f"🚇 {station_info['name']} MRT",
+                icon=folium.Icon(color="red", icon="train", prefix="fa"),
+            ).add_to(m)
+            folium.Circle(
+                [station_info["lat"], station_info["lng"]],
+                radius=DEFAULT_RADIUS_M, color="red", fill=True, fill_opacity=0.05, weight=1,
+            ).add_to(m)
+
+        # ==== CONDO TAB / HDB TAB ====
+        if show_condo and show_hdb:
+            tab_condo, tab_hdb = st.tabs(["🏢 Condo", "🏘️ HDB"])
+        elif show_condo:
+            tab_condo = st.container()
+            tab_hdb = None
+        else:
+            tab_condo = None
+            tab_hdb = st.container()
+
+        # ======================== CONDO ========================
+        if show_condo:
+            with tab_condo:
+                with st.spinner("Loading condo data..."):
+                    try:
+                        condo_df = load_condo_data()
+                    except Exception as e:
+                        st.error(f"Failed to load condo data: {e}")
+                        condo_df = pd.DataFrame()
+
+                if not condo_df.empty:
+                    # Filter by district
+                    target_districts = get_districts_for_mrt(target_station) if target_station else []
+                    if target_districts:
+                        filtered_condo = condo_df[condo_df["postal_district"].isin(target_districts)].copy()
+                    else:
+                        filtered_condo = condo_df.copy()
+
+                    # Filter by estimated rent
+                    rent_col = f"est_rent_{condo_bedrooms}br"
+                    if rent_col in filtered_condo.columns:
+                        filtered_condo = filtered_condo[
+                            (filtered_condo[rent_col] >= condo_price[0]) &
+                            (filtered_condo[rent_col] <= condo_price[1])
+                        ].copy()
+
+                    # Sort
+                    if "High to Low" in sort_by:
+                        filtered_condo = filtered_condo.sort_values(rent_col, ascending=False)
+                    elif "Most Popular" in sort_by:
+                        filtered_condo = filtered_condo.sort_values("rental_contracts", ascending=False)
+                    else:
+                        filtered_condo = filtered_condo.sort_values(rent_col)
+
+                    # Metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Condo Projects", len(filtered_condo))
+                    with col2:
+                        if not filtered_condo.empty:
+                            st.metric(f"Avg {condo_bedrooms}BR", f"${int(filtered_condo[rent_col].mean()):,}")
+                        else:
+                            st.metric(f"Avg {condo_bedrooms}BR", "N/A")
+                    with col3:
+                        if not filtered_condo.empty:
+                            st.metric("Range", f"${int(filtered_condo[rent_col].min()):,} - ${int(filtered_condo[rent_col].max()):,}")
+                        else:
+                            st.metric("Range", "N/A")
+
+                    # Map markers for condos
+                    geocode_limit = min(len(filtered_condo), 30)
+                    for _, row in filtered_condo.head(geocode_limit).iterrows():
+                        coords = geocode_cached(row["project_name"])
+                        if coords:
+                            lat, lng = coords
+                            est_rent = int(row[rent_col])
+                            url_c = build_99co_url(project_name=row["project_name"], bedrooms=condo_bedrooms)
+                            popup_html = f"""
+                            <div style="min-width:220px;">
+                                <b>🏢 {row['project_name']}</b><br>
+                                📍 District {row['postal_district']} - {row['district_area']}<br>
+                                💰 Est. {condo_bedrooms}BR: <b>${est_rent:,}/mo</b><br>
+                                📊 Median ${row['median_psf']:.2f} psf<br>
+                                📝 {int(row['rental_contracts'])} contracts<br>
+                                <a href="{url_c}" target="_blank">99.co →</a>
+                            </div>
+                            """
+                            price_ratio = (est_rent - condo_price[0]) / max(condo_price[1] - condo_price[0], 1)
+                            color = "green" if price_ratio < 0.33 else ("blue" if price_ratio < 0.66 else "orange")
+                            folium.Marker(
+                                [lat, lng],
+                                popup=folium.Popup(popup_html, max_width=300),
+                                tooltip=f"🏢 ${est_rent:,} - {row['project_name']}",
+                                icon=folium.Icon(color=color, icon="building", prefix="fa"),
+                            ).add_to(m)
+
+                    # Listing cards
+                    st.subheader(f"Condo Projects ({len(filtered_condo)})")
+                    if filtered_condo.empty:
+                        st.warning("No condos match. Try adjusting filters.")
+                    else:
+                        typical_size = TYPICAL_SIZES.get(condo_bedrooms, 530)
+                        for _, row in filtered_condo.iterrows():
+                            est_rent = int(row[rent_col])
+                            url_99p = build_99co_url(project_name=row["project_name"], bedrooms=condo_bedrooms,
+                                                     price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15))
+                            url_pgp = build_propertyguru_url(project_name=row["project_name"], bedrooms=condo_bedrooms,
+                                                             price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15))
+                            with st.container():
+                                c1, c2, c3 = st.columns([3, 2, 2])
+                                with c1:
+                                    st.markdown(f"**{row['project_name']}**")
+                                    st.caption(f"📍 D{row['postal_district']} {row['district_area']} | 📝 {int(row['rental_contracts'])} contracts")
+                                with c2:
+                                    st.markdown(f"### ${est_rent:,}/mo")
+                                    st.caption(f"Est. {condo_bedrooms}BR ({typical_size}sqft) | Median ${row['median_psf']:.2f} psf | P25-P75: ${row['p25_psf']:.2f}-${row['p75_psf']:.2f}")
+                                with c3:
+                                    st.markdown(f"[99.co]({url_99p}) | [PropertyGuru]({url_pgp})")
+                                st.divider()
+
+                    # Table
+                    with st.expander("📊 Condo Data Table"):
+                        if not filtered_condo.empty:
+                            disp = filtered_condo[["project_name", "postal_district", "district_area",
+                                                    "median_psf", "p25_psf", "p75_psf", "rental_contracts", rent_col]].copy()
+                            disp.columns = ["Project", "District", "Area", "Median PSF", "P25", "P75", "Contracts", f"Est {condo_bedrooms}BR"]
+                            st.dataframe(disp, use_container_width=True, hide_index=True)
+
+        # ======================== HDB ========================
+        if show_hdb:
+            with tab_hdb:
+                with st.spinner("Loading HDB data..."):
+                    try:
+                        hdb_raw = load_hdb_data()
+                    except Exception as e:
+                        st.error(f"Failed to load HDB data: {e}")
+                        hdb_raw = pd.DataFrame()
+
+                if not hdb_raw.empty:
+                    # Filter by town (MRT-based)
+                    target_towns = get_towns_for_mrt(target_station) if target_station else []
+                    if target_towns:
+                        hdb_filtered = hdb_raw[hdb_raw["town"].isin(target_towns)].copy()
+                    else:
+                        hdb_filtered = hdb_raw.copy()
+
+                    # Filter by flat type
+                    if hdb_flat_types:
+                        hdb_filtered = hdb_filtered[hdb_filtered["flat_type"].isin(hdb_flat_types)].copy()
+
+                    # Filter by price
+                    hdb_filtered = hdb_filtered[
+                        (hdb_filtered["monthly_rent"] >= hdb_price[0]) &
+                        (hdb_filtered["monthly_rent"] <= hdb_price[1])
                     ].copy()
 
-                # Sort
-                if "High to Low" in sort_by:
-                    filtered_condo = filtered_condo.sort_values(rent_col, ascending=False)
-                elif "Most Popular" in sort_by:
-                    filtered_condo = filtered_condo.sort_values("rental_contracts", ascending=False)
-                else:
-                    filtered_condo = filtered_condo.sort_values(rent_col)
+                    # Aggregate by town + flat_type
+                    hdb_town_agg = aggregate_hdb_by_town(hdb_filtered)
 
-                # Metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Condo Projects", len(filtered_condo))
-                with col2:
-                    if not filtered_condo.empty:
-                        st.metric(f"Avg {condo_bedrooms}BR", f"${int(filtered_condo[rent_col].mean()):,}")
+                    # Sort
+                    if "High to Low" in sort_by:
+                        hdb_town_agg = hdb_town_agg.sort_values("median_rent", ascending=False)
+                    elif "Most Popular" in sort_by:
+                        hdb_town_agg = hdb_town_agg.sort_values("transaction_count", ascending=False)
                     else:
-                        st.metric(f"Avg {condo_bedrooms}BR", "N/A")
-                with col3:
-                    if not filtered_condo.empty:
-                        st.metric("Range", f"${int(filtered_condo[rent_col].min()):,} - ${int(filtered_condo[rent_col].max()):,}")
+                        hdb_town_agg = hdb_town_agg.sort_values("median_rent")
+
+                    # Aggregate by street for detail view
+                    hdb_street_agg = aggregate_hdb_data(hdb_filtered)
+                    if "High to Low" in sort_by:
+                        hdb_street_agg = hdb_street_agg.sort_values("median_rent", ascending=False)
+                    elif "Most Popular" in sort_by:
+                        hdb_street_agg = hdb_street_agg.sort_values("transaction_count", ascending=False)
                     else:
-                        st.metric("Range", "N/A")
+                        hdb_street_agg = hdb_street_agg.sort_values("median_rent")
 
-                # Map markers for condos
-                geocode_limit = min(len(filtered_condo), 30)
-                for _, row in filtered_condo.head(geocode_limit).iterrows():
-                    coords = geocode_cached(row["project_name"])
-                    if coords:
-                        lat, lng = coords
-                        est_rent = int(row[rent_col])
-                        url_c = build_99co_url(project_name=row["project_name"], bedrooms=condo_bedrooms)
-                        popup_html = f"""
-                        <div style="min-width:220px;">
-                            <b>🏢 {row['project_name']}</b><br>
-                            📍 District {row['postal_district']} - {row['district_area']}<br>
-                            💰 Est. {condo_bedrooms}BR: <b>${est_rent:,}/mo</b><br>
-                            📊 Median ${row['median_psf']:.2f} psf<br>
-                            📝 {int(row['rental_contracts'])} contracts<br>
-                            <a href="{url_c}" target="_blank">99.co →</a>
-                        </div>
-                        """
-                        price_ratio = (est_rent - condo_price[0]) / max(condo_price[1] - condo_price[0], 1)
-                        color = "green" if price_ratio < 0.33 else ("blue" if price_ratio < 0.66 else "orange")
-                        folium.Marker(
-                            [lat, lng],
-                            popup=folium.Popup(popup_html, max_width=300),
-                            tooltip=f"🏢 ${est_rent:,} - {row['project_name']}",
-                            icon=folium.Icon(color=color, icon="building", prefix="fa"),
-                        ).add_to(m)
+                    # Metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("HDB Transactions", len(hdb_filtered))
+                    with col2:
+                        if not hdb_filtered.empty:
+                            st.metric("Median Rent", f"${int(hdb_filtered['monthly_rent'].median()):,}")
+                        else:
+                            st.metric("Median Rent", "N/A")
+                    with col3:
+                        if not hdb_filtered.empty:
+                            st.metric("Range", f"${hdb_filtered['monthly_rent'].min():,} - ${hdb_filtered['monthly_rent'].max():,}")
+                        else:
+                            st.metric("Range", "N/A")
 
-                # Listing cards
-                st.subheader(f"Condo Projects ({len(filtered_condo)})")
-                if filtered_condo.empty:
-                    st.warning("No condos match. Try adjusting filters.")
-                else:
-                    typical_size = TYPICAL_SIZES.get(condo_bedrooms, 530)
-                    for _, row in filtered_condo.iterrows():
-                        est_rent = int(row[rent_col])
-                        url_99p = build_99co_url(project_name=row["project_name"], bedrooms=condo_bedrooms,
-                                                 price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15))
-                        url_pgp = build_propertyguru_url(project_name=row["project_name"], bedrooms=condo_bedrooms,
-                                                         price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15))
-                        with st.container():
-                            c1, c2, c3 = st.columns([3, 2, 2])
-                            with c1:
-                                st.markdown(f"**{row['project_name']}**")
-                                st.caption(f"📍 D{row['postal_district']} {row['district_area']} | 📝 {int(row['rental_contracts'])} contracts")
-                            with c2:
-                                st.markdown(f"### ${est_rent:,}/mo")
-                                st.caption(f"Est. {condo_bedrooms}BR ({typical_size}sqft) | Median ${row['median_psf']:.2f} psf | P25-P75: ${row['p25_psf']:.2f}-${row['p75_psf']:.2f}")
-                            with c3:
-                                st.markdown(f"[99.co]({url_99p}) | [PropertyGuru]({url_pgp})")
-                            st.divider()
+                    # Map markers for HDB streets
+                    geocode_hdb_limit = min(len(hdb_street_agg), 30)
+                    for _, row in hdb_street_agg.head(geocode_hdb_limit).iterrows():
+                        addr = f"{row['latest_block']} {row['street_name']} Singapore"
+                        coords = geocode_cached(addr)
+                        if coords:
+                            lat, lng = coords
+                            popup_html = f"""
+                            <div style="min-width:200px;">
+                                <b>🏘️ {row['street_name']}</b><br>
+                                📍 {row['town']} | {FLAT_TYPE_MAP.get(row['flat_type'], row['flat_type'])}<br>
+                                💰 Median: <b>${int(row['median_rent']):,}/mo</b><br>
+                                📊 Range: ${int(row['min_rent']):,} - ${int(row['max_rent']):,}<br>
+                                📝 {row['transaction_count']} transactions
+                            </div>
+                            """
+                            price_ratio = (row['median_rent'] - hdb_price[0]) / max(hdb_price[1] - hdb_price[0], 1)
+                            color = "green" if price_ratio < 0.33 else ("cadetblue" if price_ratio < 0.66 else "purple")
+                            folium.Marker(
+                                [lat, lng],
+                                popup=folium.Popup(popup_html, max_width=300),
+                                tooltip=f"🏘️ ${int(row['median_rent']):,} - {row['street_name']}",
+                                icon=folium.Icon(color=color, icon="home", prefix="fa"),
+                            ).add_to(m)
 
-                # Table
-                with st.expander("📊 Condo Data Table"):
-                    if not filtered_condo.empty:
-                        disp = filtered_condo[["project_name", "postal_district", "district_area",
-                                                "median_psf", "p25_psf", "p75_psf", "rental_contracts", rent_col]].copy()
-                        disp.columns = ["Project", "District", "Area", "Median PSF", "P25", "P75", "Contracts", f"Est {condo_bedrooms}BR"]
-                        st.dataframe(disp, use_container_width=True, hide_index=True)
-
-    # ======================== HDB ========================
-    if show_hdb:
-        with tab_hdb:
-            with st.spinner("Loading HDB data..."):
-                try:
-                    hdb_raw = load_hdb_data()
-                except Exception as e:
-                    st.error(f"Failed to load HDB data: {e}")
-                    hdb_raw = pd.DataFrame()
-
-            if not hdb_raw.empty:
-                # Filter by town (MRT-based)
-                target_towns = get_towns_for_mrt(target_station) if target_station else []
-                if target_towns:
-                    hdb_filtered = hdb_raw[hdb_raw["town"].isin(target_towns)].copy()
-                else:
-                    hdb_filtered = hdb_raw.copy()
-
-                # Filter by flat type
-                if hdb_flat_types:
-                    hdb_filtered = hdb_filtered[hdb_filtered["flat_type"].isin(hdb_flat_types)].copy()
-
-                # Filter by price
-                hdb_filtered = hdb_filtered[
-                    (hdb_filtered["monthly_rent"] >= hdb_price[0]) &
-                    (hdb_filtered["monthly_rent"] <= hdb_price[1])
-                ].copy()
-
-                # Aggregate by town + flat_type
-                hdb_town_agg = aggregate_hdb_by_town(hdb_filtered)
-
-                # Sort
-                if "High to Low" in sort_by:
-                    hdb_town_agg = hdb_town_agg.sort_values("median_rent", ascending=False)
-                elif "Most Popular" in sort_by:
-                    hdb_town_agg = hdb_town_agg.sort_values("transaction_count", ascending=False)
-                else:
-                    hdb_town_agg = hdb_town_agg.sort_values("median_rent")
-
-                # Aggregate by street for detail view
-                hdb_street_agg = aggregate_hdb_data(hdb_filtered)
-                if "High to Low" in sort_by:
-                    hdb_street_agg = hdb_street_agg.sort_values("median_rent", ascending=False)
-                elif "Most Popular" in sort_by:
-                    hdb_street_agg = hdb_street_agg.sort_values("transaction_count", ascending=False)
-                else:
-                    hdb_street_agg = hdb_street_agg.sort_values("median_rent")
-
-                # Metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("HDB Transactions", len(hdb_filtered))
-                with col2:
-                    if not hdb_filtered.empty:
-                        st.metric("Median Rent", f"${int(hdb_filtered['monthly_rent'].median()):,}")
+                    # HDB Town overview cards
+                    st.subheader(f"HDB Rental Overview ({len(hdb_town_agg)} town-type combos)")
+                    if hdb_town_agg.empty:
+                        st.warning("No HDB listings match. Try adjusting filters.")
                     else:
-                        st.metric("Median Rent", "N/A")
-                with col3:
-                    if not hdb_filtered.empty:
-                        st.metric("Range", f"${hdb_filtered['monthly_rent'].min():,} - ${hdb_filtered['monthly_rent'].max():,}")
-                    else:
-                        st.metric("Range", "N/A")
+                        for _, row in hdb_town_agg.iterrows():
+                            flat_label = FLAT_TYPE_MAP.get(row["flat_type"], row["flat_type"])
+                            with st.container():
+                                c1, c2, c3 = st.columns([2, 3, 2])
+                                with c1:
+                                    st.markdown(f"**{row['town']}** — {flat_label}")
+                                    st.caption(f"📝 {row['transaction_count']} transactions (last 6 months)")
+                                with c2:
+                                    st.markdown(f"### ${int(row['median_rent']):,}/mo")
+                                    st.caption(f"P25: ${int(row['p25_rent']):,} | P75: ${int(row['p75_rent']):,} | Range: ${int(row['min_rent']):,}-${int(row['max_rent']):,}")
+                                with c3:
+                                    url_hdb_99 = build_99co_url(location=row["town"].title())
+                                    st.markdown(f"[🔗 99.co]({url_hdb_99})")
+                                st.divider()
 
-                # Map markers for HDB streets
-                geocode_hdb_limit = min(len(hdb_street_agg), 30)
-                for _, row in hdb_street_agg.head(geocode_hdb_limit).iterrows():
-                    addr = f"{row['latest_block']} {row['street_name']} Singapore"
-                    coords = geocode_cached(addr)
-                    if coords:
-                        lat, lng = coords
-                        popup_html = f"""
-                        <div style="min-width:200px;">
-                            <b>🏘️ {row['street_name']}</b><br>
-                            📍 {row['town']} | {FLAT_TYPE_MAP.get(row['flat_type'], row['flat_type'])}<br>
-                            💰 Median: <b>${int(row['median_rent']):,}/mo</b><br>
-                            📊 Range: ${int(row['min_rent']):,} - ${int(row['max_rent']):,}<br>
-                            📝 {row['transaction_count']} transactions
-                        </div>
-                        """
-                        price_ratio = (row['median_rent'] - hdb_price[0]) / max(hdb_price[1] - hdb_price[0], 1)
-                        color = "green" if price_ratio < 0.33 else ("cadetblue" if price_ratio < 0.66 else "purple")
-                        folium.Marker(
-                            [lat, lng],
-                            popup=folium.Popup(popup_html, max_width=300),
-                            tooltip=f"🏘️ ${int(row['median_rent']):,} - {row['street_name']}",
-                            icon=folium.Icon(color=color, icon="home", prefix="fa"),
-                        ).add_to(m)
+                    # Street detail table
+                    with st.expander("📊 HDB Street-Level Data"):
+                        if not hdb_street_agg.empty:
+                            disp = hdb_street_agg[["town", "flat_type", "street_name", "latest_block",
+                                                    "median_rent", "min_rent", "max_rent", "transaction_count"]].copy()
+                            disp.columns = ["Town", "Type", "Street", "Block", "Median", "Min", "Max", "Txns"]
+                            st.dataframe(disp, use_container_width=True, hide_index=True)
 
-                # HDB Town overview cards
-                st.subheader(f"HDB Rental Overview ({len(hdb_town_agg)} town-type combos)")
-                if hdb_town_agg.empty:
-                    st.warning("No HDB listings match. Try adjusting filters.")
-                else:
-                    for _, row in hdb_town_agg.iterrows():
-                        flat_label = FLAT_TYPE_MAP.get(row["flat_type"], row["flat_type"])
-                        with st.container():
-                            c1, c2, c3 = st.columns([2, 3, 2])
-                            with c1:
-                                st.markdown(f"**{row['town']}** — {flat_label}")
-                                st.caption(f"📝 {row['transaction_count']} transactions (last 6 months)")
-                            with c2:
-                                st.markdown(f"### ${int(row['median_rent']):,}/mo")
-                                st.caption(f"P25: ${int(row['p25_rent']):,} | P75: ${int(row['p75_rent']):,} | Range: ${int(row['min_rent']):,}-${int(row['max_rent']):,}")
-                            with c3:
-                                url_hdb_99 = build_99co_url(location=row["town"].title())
-                                st.markdown(f"[🔗 99.co]({url_hdb_99})")
-                            st.divider()
+        # ======================== MAP (shared) ========================
+        st.subheader("📍 Map")
+        st_folium(m, width=None, height=500, use_container_width=True)
 
-                # Street detail table
-                with st.expander("📊 HDB Street-Level Data"):
-                    if not hdb_street_agg.empty:
-                        disp = hdb_street_agg[["town", "flat_type", "street_name", "latest_block",
-                                                "median_rent", "min_rent", "max_rent", "transaction_count"]].copy()
-                        disp.columns = ["Town", "Type", "Street", "Block", "Median", "Min", "Max", "Txns"]
-                        st.dataframe(disp, use_container_width=True, hide_index=True)
+        # Tips
+        with st.expander("💡 Tips"):
+            st.markdown("""
+            **Condo tips:**
+            - Google "*condo name* + brochure" for floor plans
+            - Check URA Rental Transactions for exact unit history
+            - Aim for P25 price when negotiating
 
-    # ======================== MAP (shared) ========================
-    st.subheader("📍 Map")
-    st_folium(m, width=None, height=500, use_container_width=True)
-
-    # Tips
-    with st.expander("💡 Tips"):
-        st.markdown("""
-        **Condo tips:**
-        - Google "*condo name* + brochure" for floor plans
-        - Check URA Rental Transactions for exact unit history
-        - Aim for P25 price when negotiating
-
-        **HDB tips:**
-        - HDB rental data shows actual approved rents (not asking prices)
-        - Compare similar flat types on the same street for fair pricing
-        - Check if the flat is within the minimum occupation period (MOP)
-        """)
+            **HDB tips:**
+            - HDB rental data shows actual approved rents (not asking prices)
+            - Compare similar flat types on the same street for fair pricing
+            - Check if the flat is within the minimum occupation period (MOP)
+            """)
 
 else:
     # ======================== WELCOME ========================

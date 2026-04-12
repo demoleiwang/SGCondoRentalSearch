@@ -58,6 +58,10 @@ def geocode_cached(name: str):
 
 
 # --- Natural Language Input ---
+# Transfer popular search click into the widget key BEFORE widget creation
+if "_popular_query" in st.session_state:
+    st.session_state["nl_query"] = st.session_state.pop("_popular_query")
+
 nl_query = st.text_input(
     "🔍 Search (e.g. 'Queenstown 1b1b 3300' or '找Bishan附近HDB 3房2500')",
     placeholder="Type your search here and press Enter...",
@@ -464,5 +468,5 @@ else:
     for i, (label, query) in enumerate(popular):
         with cols[i % 5]:
             if st.button(label, key=f"pop_{i}", use_container_width=True):
-                st.session_state["nl_query"] = query
+                st.session_state["_popular_query"] = query
                 st.rerun()

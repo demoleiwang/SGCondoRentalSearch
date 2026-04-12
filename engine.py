@@ -53,18 +53,20 @@ def parse_query(text: str) -> Criteria:
             break
 
     # --- Extract bedroom count ---
-    # Patterns: "1b1b", "2b2b", "1 bedroom", "2房", "3br", "studio"
+    # Patterns: "1b1b", "2b2b", "1 bedroom", "2房", "3br", "3-room", "studio"
     bed_patterns = [
         (r'(\d)\s*b\s*\d\s*b', 1),          # 1b1b, 2b2b
+        (r'(\d)\s*[-\s]?room', 1),           # 3-room, 3 room
         (r'(\d)\s*(?:bed(?:room)?s?|br|bdr)', 1),  # 1 bedroom, 2br
         (r'(\d)\s*房', 1),                    # 2房
         (r'studio', 0),                        # studio = 0 bedrooms
+        (r'executive', 5),                     # executive = 5
     ]
     for pattern, group_or_val in bed_patterns:
         m = re.search(pattern, text_lower)
         if m:
-            if isinstance(group_or_val, int) and group_or_val == 0:
-                criteria["bedrooms"] = 0
+            if group_or_val in (0, 5):
+                criteria["bedrooms"] = group_or_val
             else:
                 criteria["bedrooms"] = int(m.group(1))
             break

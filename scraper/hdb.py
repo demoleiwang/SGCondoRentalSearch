@@ -1,12 +1,21 @@
 """Fetch HDB rental transaction data from data.gov.sg."""
 
 import io
+import time
+from pathlib import Path
+
 import requests
 import pandas as pd
 
 # Dataset: Renting Out of Flats from Jan 2021
 DATASET_ID = "d_c9f57187485a850908655db0e8cfe651"
 API_URL = f"https://api-open.data.gov.sg/v1/public/api/datasets/{DATASET_ID}/poll-download"
+
+# Local cache
+_CACHE_DIR = Path(__file__).parent.parent / "data" / "cache"
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_HDB_CACHE = _CACHE_DIR / "hdb_rental.csv"
+_CACHE_TTL = 86400  # 24 hours
 
 # HDB town to MRT station mapping
 TOWN_TO_MRT = {
@@ -65,18 +74,39 @@ def fetch_hdb_rental_data(recent_months: int = 6) -> pd.DataFrame:
       town, flat_type, street_name, block, monthly_rent, rent_approval_date,
       median_rent, min_rent, max_rent, transaction_count
     """
-    resp = requests.get(API_URL, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
+    # Use local cache if fresh
+    if _HDB_CACHE.exists():
+        age = time.time() - _HDB_CACHE.stat().st_mtime
+        if age < _CACHE_TTL:
+            df = pd.read_csv(_HDB_CACHE)
+            all_dates = sorted(df["rent_approval_date"].unique())
+            if len(all_dates) > recent_months:
+                cutoff = all_dates[-recent_months]
+            else:
+                cutoff = all_dates[0]
+            return df[df["rent_approval_date"] >= cutoff].copy()
 
-    if data.get("code") != 0:
-        raise RuntimeError(f"data.gov.sg API error: {data}")
+    try:
+        resp = requests.get(API_URL, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
 
-    download_url = data["data"]["url"]
-    csv_resp = requests.get(download_url, timeout=60)
-    csv_resp.raise_for_status()
+        if data.get("code") != 0 or data.get("data", {}).get("status") != "DOWNLOAD_SUCCESS":
+            raise RuntimeError(f"API error: {data}")
 
-    df = pd.read_csv(io.StringIO(csv_resp.text))
+        download_url = data["data"]["url"]
+        csv_resp = requests.get(download_url, timeout=60)
+        csv_resp.raise_for_status()
+
+        # Save to cache
+        _HDB_CACHE.write_text(csv_resp.text)
+        df = pd.read_csv(io.StringIO(csv_resp.text))
+    except Exception:
+        # Fall back to stale cache if available
+        if _HDB_CACHE.exists():
+            df = pd.read_csv(_HDB_CACHE)
+        else:
+            raise
 
     # Filter to recent months
     all_dates = sorted(df["rent_approval_date"].unique())

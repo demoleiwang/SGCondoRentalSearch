@@ -1,8 +1,18 @@
 """Fetch condo rental data from data.gov.sg (URA source)."""
 
 import io
+import os
+import time
+from pathlib import Path
+
 import requests
 import pandas as pd
+
+# Local cache directory
+_CACHE_DIR = Path(__file__).parent.parent / "data" / "cache"
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_CONDO_CACHE = _CACHE_DIR / "condo_rental.csv"
+_CACHE_TTL = 86400  # 24 hours
 
 # Dataset: Rentals of Non-Landed Residential Buildings, Quarterly
 DATASET_ID = "d_149ac00a2734bb0a03867bbe2ec0e7b0"
@@ -97,29 +107,40 @@ TYPICAL_SIZES = {
 }
 
 
-def fetch_rental_data() -> pd.DataFrame:
-    """
-    Fetch latest URA condo rental data from data.gov.sg.
-    Returns DataFrame with columns:
-      project_name, postal_district, district_area, median_psf,
-      25th_psf, 75th_psf, rental_contracts,
-      est_rent_1br, est_rent_2br, est_rent_3br
-    """
-    # Get download URL
-    resp = requests.get(API_URL, timeout=15)
+def _download_csv(api_url: str, cache_path: Path) -> str:
+    """Download CSV from data.gov.sg and cache locally. Returns CSV text."""
+    # Use cache if fresh
+    if cache_path.exists():
+        age = time.time() - cache_path.stat().st_mtime
+        if age < _CACHE_TTL:
+            return cache_path.read_text()
+
+    resp = requests.get(api_url, timeout=15)
     resp.raise_for_status()
     data = resp.json()
 
     if data.get("code") != 0 or data.get("data", {}).get("status") != "DOWNLOAD_SUCCESS":
+        # If API fails but cache exists (even stale), use it
+        if cache_path.exists():
+            return cache_path.read_text()
         raise RuntimeError(f"data.gov.sg API error: {data}")
 
     download_url = data["data"]["url"]
-
-    # Download CSV
-    csv_resp = requests.get(download_url, timeout=30)
+    csv_resp = requests.get(download_url, timeout=60)
     csv_resp.raise_for_status()
 
-    df = pd.read_csv(io.StringIO(csv_resp.text))
+    # Save to cache
+    cache_path.write_text(csv_resp.text)
+    return csv_resp.text
+
+
+def fetch_rental_data() -> pd.DataFrame:
+    """
+    Fetch latest URA condo rental data from data.gov.sg.
+    Uses local file cache (24h TTL) to avoid rate limits.
+    """
+    csv_text = _download_csv(API_URL, _CONDO_CACHE)
+    df = pd.read_csv(io.StringIO(csv_text))
 
     # Use latest quarter only
     latest_qtr = df["qtr"].max()

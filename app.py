@@ -231,11 +231,12 @@ if search_clicked or nl_query:
                 f"{rank} **{strat.station}** ({strat.distance_m}m) — {len(strat_results)} condos | {strat.reason}",
                 expanded=(i < 3),
             ):
+                ura_url = "https://www.ura.gov.sg/property-market-information/pmiResidentialRentalSearch"
                 for r in strat_results[:5]:
                     st.markdown(
                         f"**{r.project_name}** — ${r.est_rent:,}/mo "
                         f"(${r.median_psf:.2f} psf, {r.contracts} contracts) "
-                        f"[99.co]({r.url_99co})"
+                        f"[99.co]({r.url_99co}) | [PropertyGuru]({r.url_propertyguru}) | [URA]({ura_url})"
                     )
                 if len(strat_results) > 5:
                     st.caption(f"... and {len(strat_results) - 5} more")
@@ -504,7 +505,8 @@ if search_clicked or nl_query:
                                     st.caption(f"P25: ${int(row['p25_rent']):,} | P75: ${int(row['p75_rent']):,} | Range: ${int(row['min_rent']):,}-${int(row['max_rent']):,}")
                                 with c3:
                                     url_hdb_99 = build_99co_url(location=row["town"].title())
-                                    st.markdown(f"[🔗 99.co]({url_hdb_99})")
+                                    url_hdb_pg = build_propertyguru_url(location=row["town"].title())
+                                    st.markdown(f"[99.co]({url_hdb_99}) | [PropertyGuru]({url_hdb_pg})")
                                 st.divider()
 
                     # Street detail table

@@ -17,7 +17,7 @@ from geo import geocode_address, get_stations_within_radius, haversine, find_sta
 from engine import parse_query, Criteria
 from scraper.data_gov import (
     fetch_rental_data, get_districts_for_mrt, DISTRICT_AREAS, TYPICAL_SIZES,
-    build_99co_url,
+    build_99co_url, build_propertyguru_url,
 )
 
 # In-memory geocode cache
@@ -82,6 +82,7 @@ class SearchResult:
     contracts: int
     strategy_name: str
     url_99co: str
+    url_propertyguru: str = ""
 
 
 @dataclass
@@ -265,6 +266,9 @@ def _run_searches(strategies: list[SearchStrategy], bedrooms: int) -> list[Searc
                 url_99co=build_99co_url(project_name=pname, bedrooms=bedrooms,
                                         price_min=int(est_rent * 0.85),
                                         price_max=int(est_rent * 1.15)),
+                url_propertyguru=build_propertyguru_url(project_name=pname, bedrooms=bedrooms,
+                                                        price_min=int(est_rent * 0.85),
+                                                        price_max=int(est_rent * 1.15)),
             ))
 
     # Sort by rent

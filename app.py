@@ -182,13 +182,19 @@ if search_clicked or nl_query:
             clat, clng = SG_CENTER
         m = folium.Map(location=[clat, clng], zoom_start=14, tiles="CartoDB positron")
 
-        # Landmark marker
+        # Landmark marker + search radius circle
         if sr.landmark_coords:
             folium.Marker(
                 [sr.landmark_coords[0], sr.landmark_coords[1]],
                 popup=f"📍 {sr.landmark_name.upper()}: {sr.landmark_address}",
                 tooltip=f"📍 {sr.landmark_name.upper()}",
                 icon=folium.Icon(color="red", icon="star", prefix="fa"),
+            ).add_to(m)
+            # Search radius circle (1.5km = smart search default radius)
+            folium.Circle(
+                [sr.landmark_coords[0], sr.landmark_coords[1]],
+                radius=1500,
+                color="red", fill=True, fill_opacity=0.05, weight=1,
             ).add_to(m)
 
         # Strategy station markers

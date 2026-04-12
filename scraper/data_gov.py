@@ -169,32 +169,11 @@ def get_districts_for_mrt(station_name: str) -> list[int]:
     return MRT_TO_DISTRICT.get(station_name, [])
 
 
-def build_99co_url(project_name: str = "", location: str = "",
-                   bedrooms: int | None = None,
-                   price_min: int | None = None,
-                   price_max: int | None = None) -> str:
-    """Build 99.co search URL for a specific condo or area."""
-    base = "https://www.99.co/singapore/rent/condos-apartments"
-    params = []
-    query = project_name.title() if project_name else location
-    if query:
-        params.append(f"query={requests.utils.quote(query)}")
-    if bedrooms is not None:
-        params.append(f"bedroom_num={bedrooms}")
-    if price_min is not None and price_max is not None:
-        params.append(f"rental_range={price_min}-{price_max}")
-    elif price_max is not None:
-        params.append(f"rental_range=any-{price_max}")
-    elif price_min is not None:
-        params.append(f"rental_range={price_min}-any")
-    return f"{base}?{'&'.join(params)}" if params else base
-
-
 def build_propertyguru_url(project_name: str = "", location: str = "",
                            bedrooms: int | None = None,
                            price_min: int | None = None,
                            price_max: int | None = None) -> str:
-    """Build PropertyGuru search URL."""
+    """Build PropertyGuru search URL (confirmed working, primary link)."""
     base = "https://www.propertyguru.com.sg/property-for-rent"
     params = ["market=residential", "property_type=C"]
     query = project_name.title() if project_name else location
@@ -209,5 +188,37 @@ def build_propertyguru_url(project_name: str = "", location: str = "",
     return f"{base}?{'&'.join(params)}"
 
 
-# URA rental search URL (working as of 2025)
-URA_RENTAL_SEARCH_URL = "https://www.ura.gov.sg/realEstateIIWeb/rental/search.action"
+def build_google_search_url(project_name: str = "", location: str = "",
+                             bedrooms: int | None = None) -> str:
+    """Build a Google search URL as reliable fallback for finding listings."""
+    query_parts = []
+    if project_name:
+        query_parts.append(project_name.title())
+    elif location:
+        query_parts.append(location)
+    query_parts.append("condo rent Singapore")
+    if bedrooms is not None:
+        query_parts.append(f"{bedrooms} bedroom")
+    query = " ".join(query_parts)
+    return f"https://www.google.com/search?q={requests.utils.quote(query)}"
+
+
+def build_99co_url(project_name: str = "", location: str = "",
+                   bedrooms: int | None = None,
+                   price_min: int | None = None,
+                   price_max: int | None = None) -> str:
+    """Build 99.co search URL (may be blocked by Cloudflare for some users)."""
+    base = "https://www.99.co/singapore/rent/condos-apartments"
+    params = []
+    query = project_name.title() if project_name else location
+    if query:
+        params.append(f"query={requests.utils.quote(query)}")
+    if bedrooms is not None:
+        params.append(f"bedroom_num={bedrooms}")
+    if price_min is not None and price_max is not None:
+        params.append(f"rental_range={price_min}-{price_max}")
+    elif price_max is not None:
+        params.append(f"rental_range=any-{price_max}")
+    elif price_min is not None:
+        params.append(f"rental_range={price_min}-any")
+    return f"{base}?{'&'.join(params)}" if params else base

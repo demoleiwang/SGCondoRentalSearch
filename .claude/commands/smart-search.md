@@ -1,62 +1,58 @@
 ---
-description: Find optimal rental areas based on commute to multiple destinations (school, office, etc.). Usage: /smart-search <describe your locations and preferences>
+description: Find optimal rental areas based on landmarks (school, office, etc.). Usage: /smart-search <describe your locations and preferences>
 ---
 
-# Smart Commute Search
+# Smart Search
 
-The user wants to find the best area to live based on their daily commute destinations. Their description: $ARGUMENTS
+The user wants to find the best area to live based on nearby landmarks. Their description: $ARGUMENTS
 
 ## What to do
 
 1. **Extract locations and preferences** from the user's description:
-   - Destinations: school, office, gym, partner's workplace, etc.
-   - Each needs a label + address (you may need to infer the full address)
+   - Landmarks: school, office, gym, etc.
    - Budget, bedrooms, extra preferences (facing, floor, etc.)
 
-2. **Run the commute analysis** using the project's commute module:
+2. **Run the smart search** using the project's smart_search module:
    ```bash
-   cd /Users/wanglei/Projects/others/rental_conda_sg && python -c "
-   from commute import Location, analyze_commute, generate_queries, format_analysis_report
-   
-   locations = [
-       Location(name='LABEL1', address='ADDRESS1'),
-       Location(name='LABEL2', address='ADDRESS2'),
-   ]
-   scored = analyze_commute(locations)
-   queries = generate_queries(scored, bedrooms=BEDS, price_min=MIN, price_max=MAX, extra_criteria='EXTRA')
-   print(format_analysis_report(locations, queries))
+   python -c "
+   from smart_search import expand_query
+   result = expand_query('$ARGUMENTS')
+   if result:
+       print(result.summary)
+   else:
+       print('No landmark detected. Try including a place name like SMU, NUS, CBD, etc.')
    "
    ```
 
-3. **For each recommended area**, run a search to get specific condos:
+3. **For detailed results per area**:
    ```bash
-   cd /Users/wanglei/Projects/others/rental_conda_sg && python -c "
-   from scraper.data_gov import fetch_rental_data, get_districts_for_mrt
-   df = fetch_rental_data()
-   districts = get_districts_for_mrt('STATION_NAME')
-   area = df[(df['postal_district'].isin(districts)) & (df['est_rent_1br'] >= MIN) & (df['est_rent_1br'] <= MAX)]
-   for _, r in area.head(5).iterrows():
-       print(f\"{r['project_name']}: \${int(r['est_rent_1br']):,}/mo (median \${r['median_psf']:.2f} psf)\")
+   python -c "
+   from smart_search import expand_query
+   result = expand_query('$ARGUMENTS')
+   if result:
+       for s in result.strategies[:5]:
+           print(f'{s.station} ({s.distance_m}m): {s.reason}')
+       print(f'Total condos found: {len(result.results)}')
+       for r in result.results[:10]:
+           print(f'  {r.project_name}: \${r.est_rent:,}/mo [{r.strategy_name}]')
+           print(f'    PropertyGuru: {r.url_propertyguru}')
    "
    ```
 
-4. **Present results** as a ranked list:
-   - Why each area is recommended (commute to each destination, direct MRT lines)
-   - Specific condos available with estimated rents
-   - Links to 99.co/PropertyGuru for live listings
-
-5. **Also launch the Streamlit app** in Smart Commute mode:
+4. **Launch the Streamlit app** for interactive exploration:
    ```bash
-   curl -s -o /dev/null -w '%{http_code}' http://localhost:8501 || (cd /Users/wanglei/Projects/others/rental_conda_sg && streamlit run app.py --server.headless true &)
+   curl -s -o /dev/null -w '%{http_code}' http://localhost:8501 || streamlit run app.py --server.headless true &
    ```
-   Tell the user to switch to "Smart Commute" mode in the sidebar.
+   Tell the user to type their query in the search box — smart expand triggers automatically.
 
-## Example descriptions:
-- "I study at SMU and work at OUE Downtown One, looking for 1br around 3300"
-- "I work at Changi Business Park, my partner works at Raffles Place, budget 4000 for 2br"
-- "NUS student, part-time at Orchard, want studio under 2500"
+## Supported landmarks
+- **Universities**: SMU, NUS, NTU, SUTD, SIM, SIT
+- **Business hubs**: CBD, MBFC, OUE Downtown, Mapletree Business City, one-north, Changi Business Park
+- **Hospitals**: SGH, NUH, TTSH
+- **Areas**: Orchard, Sentosa, Changi Airport
 
-## Common Singapore landmarks:
-- **Universities**: SMU (Bras Basah), NUS (Kent Ridge), NTU (Pioneer), SUTD (Upper Changi)
-- **Business hubs**: CBD/Raffles Place, Changi Business Park, one-north, Mapletree Business City
-- **Malls**: Orchard Road, Bugis Junction, VivoCity (HarbourFront)
+## Example queries
+- "SMU附近 1b1b 3300"
+- "NUS附近便宜的1房 2500以内"
+- "CBD附近 2br 5000 south facing"
+- "找NTU附近的2房 3000左右"

@@ -8,7 +8,7 @@ sys.path.insert(0, ".")
 
 import pytest
 import requests
-from scraper.data_gov import build_99co_url, build_propertyguru_url, URA_RENTAL_SEARCH_URL
+from scraper.data_gov import build_propertyguru_url, build_google_search_url, build_99co_url
 
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
@@ -87,18 +87,25 @@ class TestPropertyGuruUrlFormat:
             assert "bedroom_num=1" in url
 
 
-class TestUraUrl:
-    def test_ura_url_constant_valid(self):
-        assert "ura.gov.sg" in URA_RENTAL_SEARCH_URL
-        assert "realEstateIIWeb" in URA_RENTAL_SEARCH_URL
+class TestGoogleSearchUrl:
+    def test_basic(self):
+        url = build_google_search_url(project_name="QUEENS PEAK")
+        assert "google.com/search" in url
+        assert "Queens%20Peak" in url or "Queens+Peak" in url
 
-    def test_ura_url_reachable(self):
-        """URA rental search page should be reachable (not a dead domain or 5xx)."""
-        resp = requests.get(URA_RENTAL_SEARCH_URL, headers=HEADERS, timeout=10, allow_redirects=True)
-        # URA's Java webapp may return 404 to raw requests but works in browser.
-        # Key check: it should NOT redirect to a "Page Not Found" error page.
-        assert "Page-Not-Found" not in resp.url
-        assert resp.status_code < 500  # server is up
+    def test_with_bedrooms(self):
+        url = build_google_search_url(project_name="ALEXIS", bedrooms=1)
+        assert "1%20bedroom" in url or "1+bedroom" in url
+
+    def test_with_location(self):
+        url = build_google_search_url(location="Queenstown")
+        assert "Queenstown" in url
+        assert "rent" in url.lower()
+
+    def test_google_reachable(self):
+        url = build_google_search_url(project_name="Alexis condo")
+        resp = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
+        assert resp.status_code == 200
 
 
 class TestSmartSearchUrls:
@@ -109,10 +116,10 @@ class TestSmartSearchUrls:
         result = expand_query("SMU附近 1b1b 3300")
         assert result is not None
         for r in result.results[:5]:
-            assert "99.co" in r.url_99co
             assert "propertyguru.com.sg" in r.url_propertyguru
+            assert "google.com/search" in r.url_google
             # Project name should be in the URL (title-cased)
-            assert r.project_name.split()[0].title() in r.url_99co.replace("%20", " ")
+            assert r.project_name.split()[0].title() in r.url_propertyguru.replace("%20", " ")
 
     def test_url_project_names_not_allcaps(self):
         """URLs should use title case, not ALL CAPS (better search results)."""
@@ -121,7 +128,7 @@ class TestSmartSearchUrls:
         if result and result.results:
             r = result.results[0]
             # Should NOT have all-caps project name in URL
-            assert r.project_name.upper() not in r.url_99co.replace("%20", " ")
+            assert r.project_name.upper() not in r.url_propertyguru.replace("%20", " ")
 
 
 if __name__ == "__main__":

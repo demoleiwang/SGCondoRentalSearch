@@ -2,7 +2,7 @@
 SG Rental Search - Interactive Streamlit Dashboard
 
 Data: URA condo stats + HDB rental transactions via data.gov.sg
-Links to 99.co / PropertyGuru for live listings
+Links to PropertyGuru for live listings
 
 Usage: streamlit run app.py
 """
@@ -22,7 +22,7 @@ from geo import find_station, get_station_names, geocode_address
 from engine import parse_query, criteria_to_display, Criteria
 from scraper.data_gov import (
     fetch_rental_data, get_districts_for_mrt, DISTRICT_AREAS, TYPICAL_SIZES,
-    build_99co_url, build_propertyguru_url,
+    build_propertyguru_url, build_google_search_url, build_99co_url,
 )
 from scraper.hdb import (
     fetch_hdb_rental_data, aggregate_hdb_by_town, aggregate_hdb_data,
@@ -39,7 +39,7 @@ st.set_page_config(
 )
 
 st.title("🏠 SG Rental Search")
-st.caption("URA & HDB official data + links to 99.co & PropertyGuru")
+st.caption("URA & HDB official data + PropertyGuru live listings")
 
 
 # --- Cache ---
@@ -146,10 +146,10 @@ search_clicked = st.sidebar.button("🔍 Search", type="primary", use_container_
 location_query = nl_criteria.get("mrt_station") or (selected_station if selected_station != "(Any)" else "")
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Browse live listings:**")
-url_99 = build_99co_url(location=location_query)
 url_pg = build_propertyguru_url(location=location_query)
-st.sidebar.markdown(f"[🔗 99.co]({url_99}) | [🔗 PropertyGuru]({url_pg})")
-st.sidebar.markdown("[📊 URA Rental](https://www.ura.gov.sg/realEstateIIWeb/rental/search.action) | [🏡 SRX](https://www.srx.com.sg/)")
+url_google = build_google_search_url(location=location_query)
+st.sidebar.markdown(f"[🔗 PropertyGuru]({url_pg})")
+st.sidebar.markdown(f"[🔍 Google Search]({url_google})")
 
 # =========================================================================
 # MAIN CONTENT
@@ -231,12 +231,12 @@ if search_clicked or nl_query:
                 f"{rank} **{strat.station}** ({strat.distance_m}m) — {len(strat_results)} condos | {strat.reason}",
                 expanded=(i < 3),
             ):
-                ura_url = "https://www.ura.gov.sg/realEstateIIWeb/rental/search.action"
                 for r in strat_results[:5]:
+                    url_g = build_google_search_url(project_name=r.project_name)
                     st.markdown(
                         f"**{r.project_name}** — ${r.est_rent:,}/mo "
                         f"(${r.median_psf:.2f} psf, {r.contracts} contracts) "
-                        f"[99.co]({r.url_99co}) | [PropertyGuru]({r.url_propertyguru}) | [URA]({ura_url})"
+                        f"[PropertyGuru]({r.url_propertyguru}) | [Google]({url_g})"
                     )
                 if len(strat_results) > 5:
                     st.caption(f"... and {len(strat_results) - 5} more")
@@ -376,10 +376,9 @@ if search_clicked or nl_query:
                         typical_size = TYPICAL_SIZES.get(condo_bedrooms, 530)
                         for _, row in filtered_condo.iterrows():
                             est_rent = int(row[rent_col])
-                            url_99p = build_99co_url(project_name=row["project_name"], bedrooms=condo_bedrooms,
-                                                     price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15))
                             url_pgp = build_propertyguru_url(project_name=row["project_name"], bedrooms=condo_bedrooms,
                                                              price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15))
+                            url_gp = build_google_search_url(project_name=row["project_name"], bedrooms=condo_bedrooms)
                             with st.container():
                                 c1, c2, c3 = st.columns([3, 2, 2])
                                 with c1:
@@ -389,7 +388,7 @@ if search_clicked or nl_query:
                                     st.markdown(f"### ${est_rent:,}/mo")
                                     st.caption(f"Est. {condo_bedrooms}BR ({typical_size}sqft) | Median ${row['median_psf']:.2f} psf | P25-P75: ${row['p25_psf']:.2f}-${row['p75_psf']:.2f}")
                                 with c3:
-                                    st.markdown(f"[99.co]({url_99p}) | [PropertyGuru]({url_pgp})")
+                                    st.markdown(f"[PropertyGuru]({url_pgp}) | [Google]({url_gp})")
                                 st.divider()
 
                     # Table
@@ -504,9 +503,9 @@ if search_clicked or nl_query:
                                     st.markdown(f"### ${int(row['median_rent']):,}/mo")
                                     st.caption(f"P25: ${int(row['p25_rent']):,} | P75: ${int(row['p75_rent']):,} | Range: ${int(row['min_rent']):,}-${int(row['max_rent']):,}")
                                 with c3:
-                                    url_hdb_99 = build_99co_url(location=row["town"].title())
                                     url_hdb_pg = build_propertyguru_url(location=row["town"].title())
-                                    st.markdown(f"[99.co]({url_hdb_99}) | [PropertyGuru]({url_hdb_pg})")
+                                    url_hdb_g = build_google_search_url(location=row["town"].title())
+                                    st.markdown(f"[PropertyGuru]({url_hdb_pg}) | [Google]({url_hdb_g})")
                                 st.divider()
 
                     # Street detail table
@@ -552,7 +551,7 @@ else:
     **Data sources:**
     - **Condo:** URA official rental statistics (551 projects, Q4 2025)
     - **HDB:** HDB rental transactions (200K+ records, 2021-2026)
-    - Click through to **99.co** / **PropertyGuru** for live listings
+    - Click through to **PropertyGuru** for live listings
     """)
 
     st.subheader("Popular Searches")

@@ -20,6 +20,13 @@ from scraper.data_gov import (
     build_propertyguru_url, build_google_search_url,
 )
 
+# Try to use current UI language; fall back to English when Streamlit isn't active
+try:
+    from i18n import get_lang as _get_lang
+except Exception:  # pragma: no cover
+    def _get_lang() -> str:
+        return "en"
+
 # In-memory geocode cache
 _geocode_cache: dict[str, tuple[float, float] | None] = {}
 
@@ -163,22 +170,33 @@ def expand_query(text: str, radius_m: int = 1500) -> SmartSearchResult | None:
         extra_parts.append(f"high floor")
     extra = " ".join(extra_parts)
 
+    lang = _get_lang()
     for station_name, dist_m in nearby:
-        # Build reason
-        if dist_m < 300:
-            reason = f"最近MRT站，步行{int(dist_m)}米"
-        elif dist_m < 600:
-            reason = f"步行可达，约{int(dist_m)}米 ({int(dist_m/80)}分钟)"
-        elif dist_m < 1000:
-            reason = f"较近，约{int(dist_m)}米，可步行或搭巴士"
+        # Build reason (language-aware)
+        if lang == "zh":
+            if dist_m < 300:
+                reason = f"最近MRT站，步行{int(dist_m)}米"
+            elif dist_m < 600:
+                reason = f"步行可达，约{int(dist_m)}米 ({int(dist_m/80)}分钟)"
+            elif dist_m < 1000:
+                reason = f"较近，约{int(dist_m)}米，可步行或搭巴士"
+            else:
+                reason = f"附近区域，约{int(dist_m)}米，可能更便宜"
         else:
-            reason = f"附近区域，约{int(dist_m)}米，可能更便宜"
+            if dist_m < 300:
+                reason = f"Closest MRT, ~{int(dist_m)}m walk"
+            elif dist_m < 600:
+                reason = f"Walkable, ~{int(dist_m)}m ({int(dist_m/80)} min)"
+            elif dist_m < 1000:
+                reason = f"Nearby, ~{int(dist_m)}m (walk or bus)"
+            else:
+                reason = f"Nearby area, ~{int(dist_m)}m (often cheaper)"
 
         # Get station's MRT lines for extra context
         s_info = find_station(station_name)
         if s_info:
             lines = "/".join(s_info.get("line", []))
-            reason += f" [{lines}线]"
+            reason += f" [{lines}]" if lang != "zh" else f" [{lines}线]"
 
         # Build query
         bed_part = f"{bedrooms}b{bedrooms}b" if bedrooms <= 2 else f"{bedrooms}br"
@@ -277,36 +295,57 @@ def _run_searches(strategies: list[SearchStrategy], bedrooms: int) -> list[Searc
 def _build_summary(landmark_key: str, landmark_addr: str,
                    strategies: list[SearchStrategy],
                    results: list[SearchResult]) -> str:
-    """Build human-readable summary of the smart search."""
+    """Build human-readable summary of the smart search (language-aware)."""
+    lang = _get_lang()
     lines = []
-    lines.append(f"## 🔍 Smart Search: {landmark_key.upper()} 附近租房分析\n")
-    lines.append(f"**目标位置**: {landmark_addr}\n")
 
-    lines.append(f"### 搜索思路 ({len(strategies)} 个方向)\n")
-    for i, s in enumerate(strategies, 1):
-        count = sum(1 for r in results if r.strategy_name == s.name)
-        lines.append(f"{i}. **{s.name}** — {s.reason} → {count} 个condo")
-
-    lines.append(f"\n### 搜索结果 (共 {len(results)} 个condo)\n")
-
-    if results:
-        prices = [r.est_rent for r in results]
-        lines.append(f"- 租金范围: ${min(prices):,} - ${max(prices):,}/月")
-        lines.append(f"- 中位租金: ${sorted(prices)[len(prices)//2]:,}/月")
-
-        # Group by strategy
-        lines.append("\n### 按区域分组\n")
-        by_strategy: dict[str, list[SearchResult]] = {}
-        for r in results:
-            by_strategy.setdefault(r.strategy_name, []).append(r)
-
-        for sname, sresults in by_strategy.items():
-            lines.append(f"**{sname}** ({len(sresults)} 个condo)")
-            for r in sresults[:3]:
-                lines.append(f"  - {r.project_name}: ${r.est_rent:,}/月 "
-                             f"(${r.median_psf:.2f} psf, {r.contracts} contracts)")
-            if len(sresults) > 3:
-                lines.append(f"  - ... 还有 {len(sresults) - 3} 个")
-            lines.append("")
+    if lang == "zh":
+        lines.append(f"## 🔍 Smart Search: {landmark_key.upper()} 附近租房分析\n")
+        lines.append(f"**目标位置**: {landmark_addr}\n")
+        lines.append(f"### 搜索思路 ({len(strategies)} 个方向)\n")
+        for i, s in enumerate(strategies, 1):
+            count = sum(1 for r in results if r.strategy_name == s.name)
+            lines.append(f"{i}. **{s.name}** — {s.reason} → {count} 个condo")
+        lines.append(f"\n### 搜索结果 (共 {len(results)} 个condo)\n")
+        if results:
+            prices = [r.est_rent for r in results]
+            lines.append(f"- 租金范围: ${min(prices):,} - ${max(prices):,}/月")
+            lines.append(f"- 中位租金: ${sorted(prices)[len(prices)//2]:,}/月")
+            lines.append("\n### 按区域分组\n")
+            by_strategy: dict[str, list[SearchResult]] = {}
+            for r in results:
+                by_strategy.setdefault(r.strategy_name, []).append(r)
+            for sname, sresults in by_strategy.items():
+                lines.append(f"**{sname}** ({len(sresults)} 个condo)")
+                for r in sresults[:3]:
+                    lines.append(f"  - {r.project_name}: ${r.est_rent:,}/月 "
+                                 f"(${r.median_psf:.2f} psf, {r.contracts} contracts)")
+                if len(sresults) > 3:
+                    lines.append(f"  - ... 还有 {len(sresults) - 3} 个")
+                lines.append("")
+    else:
+        lines.append(f"## 🔍 Smart Search: rentals near {landmark_key.upper()}\n")
+        lines.append(f"**Target**: {landmark_addr}\n")
+        lines.append(f"### Search strategies ({len(strategies)})\n")
+        for i, s in enumerate(strategies, 1):
+            count = sum(1 for r in results if r.strategy_name == s.name)
+            lines.append(f"{i}. **{s.name}** — {s.reason} → {count} condos")
+        lines.append(f"\n### Results ({len(results)} condos total)\n")
+        if results:
+            prices = [r.est_rent for r in results]
+            lines.append(f"- Rent range: ${min(prices):,} - ${max(prices):,}/mo")
+            lines.append(f"- Median rent: ${sorted(prices)[len(prices)//2]:,}/mo")
+            lines.append("\n### Grouped by area\n")
+            by_strategy: dict[str, list[SearchResult]] = {}
+            for r in results:
+                by_strategy.setdefault(r.strategy_name, []).append(r)
+            for sname, sresults in by_strategy.items():
+                lines.append(f"**{sname}** ({len(sresults)} condos)")
+                for r in sresults[:3]:
+                    lines.append(f"  - {r.project_name}: ${r.est_rent:,}/mo "
+                                 f"(${r.median_psf:.2f} psf, {r.contracts} contracts)")
+                if len(sresults) > 3:
+                    lines.append(f"  - ... and {len(sresults) - 3} more")
+                lines.append("")
 
     return "\n".join(lines)

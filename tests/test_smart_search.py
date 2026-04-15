@@ -84,7 +84,8 @@ class TestExpandQuery:
     def test_summary_generated(self):
         result = expand_query("SMU附近 1br 3300")
         assert "SMU" in result.summary
-        assert "搜索思路" in result.summary
+        # Summary is language-aware; accept either Chinese or English heading
+        assert "搜索思路" in result.summary or "Search strategies" in result.summary
 
     def test_nus_nearby(self):
         result = expand_query("NUS附近 1br 2500-3500")

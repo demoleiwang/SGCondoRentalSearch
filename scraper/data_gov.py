@@ -12,6 +12,11 @@ import pandas as pd
 _CACHE_DIR = Path(__file__).parent.parent / "data" / "cache"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 _CONDO_CACHE = _CACHE_DIR / "condo_rental.csv"
+# Snapshot directory - we store one CSV per quarter so trends accumulate over time.
+# The upstream data.gov.sg dataset only exposes the latest quarter, so we build our
+# own local history by saving each new quarter we see.
+_SNAPSHOT_DIR = _CACHE_DIR / "condo_snapshots"
+_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 _CACHE_TTL = 86400  # 24 hours
 
 # Dataset: Rentals of Non-Landed Residential Buildings, Quarterly
@@ -134,34 +139,105 @@ def _download_csv(api_url: str, cache_path: Path) -> str:
     return csv_resp.text
 
 
-def fetch_rental_data() -> pd.DataFrame:
-    """
-    Fetch latest URA condo rental data from data.gov.sg.
-    Uses local file cache (24h TTL) to avoid rate limits.
-    """
-    csv_text = _download_csv(API_URL, _CONDO_CACHE)
-    df = pd.read_csv(io.StringIO(csv_text))
-
-    # Use latest quarter only
-    latest_qtr = df["qtr"].max()
-    df = df[df["qtr"] == latest_qtr].copy()
-
-    # Add area descriptions
+def _prepare_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Add area descriptions, rename columns, estimate rents."""
     df["district_area"] = df["postal_district"].map(DISTRICT_AREAS).fillna("Other")
-
-    # Rename for clarity
     df = df.rename(columns={
         "25th_percentile": "p25_psf",
         "median": "median_psf",
         "75th_percentile": "p75_psf",
     })
-
-    # Estimate total monthly rent for each unit type
     for beds, size in TYPICAL_SIZES.items():
         col_name = f"est_rent_{beds}br"
         df[col_name] = (df["median_psf"] * size).round(0).astype(int)
-
     return df
+
+
+def _save_snapshot(df: pd.DataFrame) -> None:
+    """
+    Save each quarter in *df* as its own snapshot file so historical quarters
+    accumulate across runs (the upstream API only returns the latest quarter).
+    """
+    if "qtr" not in df.columns:
+        return
+    for qtr in df["qtr"].unique():
+        if not isinstance(qtr, str) or not qtr:
+            continue
+        snapshot_path = _SNAPSHOT_DIR / f"condo_{qtr}.csv"
+        # Always overwrite — latest fetch is authoritative for that quarter
+        df[df["qtr"] == qtr].to_csv(snapshot_path, index=False)
+
+
+def _load_snapshots() -> pd.DataFrame:
+    """Load all saved quarterly snapshots and concatenate them."""
+    frames = []
+    for p in sorted(_SNAPSHOT_DIR.glob("condo_*.csv")):
+        try:
+            frames.append(pd.read_csv(p))
+        except Exception:
+            continue
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def fetch_rental_data() -> pd.DataFrame:
+    """
+    Fetch latest URA condo rental data from data.gov.sg.
+    Uses local file cache (24h TTL) to avoid rate limits.
+    Returns only the latest quarter. Also writes a quarterly snapshot so that
+    fetch_trend_data() can accumulate history over time.
+    """
+    csv_text = _download_csv(API_URL, _CONDO_CACHE)
+    df = pd.read_csv(io.StringIO(csv_text))
+
+    # Persist quarterly snapshot (all quarters in this payload)
+    _save_snapshot(df)
+
+    latest_qtr = df["qtr"].max()
+    df = df[df["qtr"] == latest_qtr].copy()
+    return _prepare_df(df)
+
+
+def fetch_trend_data(recent_quarters: int = 8) -> pd.DataFrame:
+    """
+    Fetch URA condo rental data for multiple quarters (for trend charts).
+
+    Merges:
+      1. The live API response (may contain only the current quarter), and
+      2. All locally accumulated quarterly snapshots.
+
+    Returns up to *recent_quarters* quarters with the usual enriched columns.
+    When only one quarter of history is available, callers should gracefully
+    fall back to hiding the trend chart.
+    """
+    frames = []
+
+    # Try live fetch; fall back to cached payload on failure
+    try:
+        csv_text = _download_csv(API_URL, _CONDO_CACHE)
+        live_df = pd.read_csv(io.StringIO(csv_text))
+        _save_snapshot(live_df)
+        frames.append(live_df)
+    except Exception:
+        pass
+
+    snap_df = _load_snapshots()
+    if not snap_df.empty:
+        frames.append(snap_df)
+
+    if not frames:
+        return pd.DataFrame()
+
+    df = pd.concat(frames, ignore_index=True)
+    # Dedupe on (qtr, project_name) - snapshots may duplicate live rows
+    if "project_name" in df.columns and "qtr" in df.columns:
+        df = df.drop_duplicates(subset=["qtr", "project_name"], keep="first")
+
+    all_qtrs = sorted(df["qtr"].unique())
+    keep = all_qtrs[-recent_quarters:] if len(all_qtrs) > recent_quarters else all_qtrs
+    df = df[df["qtr"].isin(keep)].copy()
+    return _prepare_df(df)
 
 
 def get_districts_for_mrt(station_name: str) -> list[int]:

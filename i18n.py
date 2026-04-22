@@ -353,6 +353,32 @@ _STRINGS: dict[str, dict[str, str]] = {
 - 确认房屋是否过了最低居住期限 (MOP)""",
     },
 
+    # -- Rent row details (P25/P75 + district comparison) --
+    "row.p25": {
+        "en": "P25 (bargaining target)",
+        "zh": "P25 (议价目标)",
+    },
+    "row.p75": {
+        "en": "P75",
+        "zh": "P75",
+    },
+    "row.vs_district_below": {
+        "en": "{pct}% below area median",
+        "zh": "低于区域中位 {pct}%",
+    },
+    "row.vs_district_above": {
+        "en": "{pct}% above area median",
+        "zh": "高于区域中位 {pct}%",
+    },
+    "row.vs_district_at": {
+        "en": "at area median",
+        "zh": "接近区域中位",
+    },
+    "row.contracts_short": {
+        "en": "{n} contracts",
+        "zh": "{n}笔合约",
+    },
+
     # -- Features Showcase --
     "features.heading": {
         "en": "What this tool can do",

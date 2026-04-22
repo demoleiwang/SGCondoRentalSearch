@@ -20,4 +20,5 @@ New findings are appended below. Resolved findings move to `done.md`.
 - [ ] `F007` (2026-04-22, P001) Condo+HDB Data card describes a data source, not a feature — feels like table-stakes reassurance in a capability grid. Repro: welcome page features grid. Source: critics/sessions/2026-04-22-P001-round2.md
 - [ ] `F008` (2026-04-22, P001) Rent Trends card example does not demonstrate trends — the click opens a normal results page with trends collapsed. Repro: click Rent Trends example. Source: critics/sessions/2026-04-22-P001-round2.md
 - [ ] `F009` (2026-04-22, P001) No visual cue that example buttons auto-submit the search — a newcomer may think it only copies text. Repro: welcome page features grid. Source: critics/sessions/2026-04-22-P001-round2.md
+- [ ] `F010` (2026-04-22, P001) P75 label lacks a tooltip explaining the percentile meaning — non-data-literate users may misread the bargaining target emoji. Repro: hover over P25 target emoji. Source: critics/sessions/2026-04-22-P001-round3.md
 

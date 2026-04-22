@@ -90,6 +90,13 @@ class SearchResult:
     strategy_name: str
     url_propertyguru: str
     url_google: str = ""
+    # P25/P75 rent estimates (derived from psf percentiles * typical size).
+    # 0 when upstream data lacks percentile columns.
+    est_rent_p25: int = 0
+    est_rent_p75: int = 0
+    # Median est-rent for this project's district at the requested bedroom count.
+    # Used to render a "vs area median" badge. 0 when district-only dataset is empty.
+    district_median_rent: int = 0
 
 
 @dataclass
@@ -247,6 +254,16 @@ def _run_searches(strategies: list[SearchStrategy], bedrooms: int) -> list[Searc
     if rent_col not in df.columns:
         return []
 
+    # Typical unit size for this bedroom count — needed to turn psf percentiles
+    # into dollar rents for P25/P75 badges.
+    typical_size = TYPICAL_SIZES.get(bedrooms, 0)
+
+    # Precompute median rent per district for the "vs area" badge.
+    district_median_map: dict[int, int] = {}
+    if rent_col in df.columns:
+        grouped = df.groupby("postal_district")[rent_col].median().round(0).astype(int)
+        district_median_map = grouped.to_dict()
+
     seen_projects = set()
     results = []
 
@@ -273,9 +290,14 @@ def _run_searches(strategies: list[SearchStrategy], bedrooms: int) -> list[Searc
             seen_projects.add(pname)
 
             est_rent = int(row[rent_col])
+            p25_psf = float(row.get("p25_psf", 0) or 0)
+            p75_psf = float(row.get("p75_psf", 0) or 0)
+            est_rent_p25 = int(round(p25_psf * typical_size)) if typical_size and p25_psf else 0
+            est_rent_p75 = int(round(p75_psf * typical_size)) if typical_size and p75_psf else 0
+            district = int(row["postal_district"])
             results.append(SearchResult(
                 project_name=pname,
-                district=int(row["postal_district"]),
+                district=district,
                 area_desc=row.get("district_area", ""),
                 est_rent=est_rent,
                 median_psf=row["median_psf"],
@@ -285,6 +307,9 @@ def _run_searches(strategies: list[SearchStrategy], bedrooms: int) -> list[Searc
                                                         price_min=int(est_rent * 0.85),
                                                         price_max=int(est_rent * 1.15)),
                 url_google=build_google_search_url(project_name=pname, bedrooms=bedrooms),
+                est_rent_p25=est_rent_p25,
+                est_rent_p75=est_rent_p75,
+                district_median_rent=int(district_median_map.get(district, 0)),
             ))
 
     # Sort by rent

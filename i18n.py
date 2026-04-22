@@ -353,6 +353,64 @@ _STRINGS: dict[str, dict[str, str]] = {
 - 确认房屋是否过了最低居住期限 (MOP)""",
     },
 
+    # -- Features Showcase --
+    "features.heading": {
+        "en": "What this tool can do",
+        "zh": "这个工具能干啥",
+    },
+    "features.subheading": {
+        "en": "Click any example to try it",
+        "zh": "点击示例即可试用",
+    },
+    "features.smart.title": {
+        "en": "Smart Landmark Search",
+        "zh": "地标智能搜索",
+    },
+    "features.smart.desc": {
+        "en": "Type a school, office, or district — we auto-expand to all nearby MRT stations and rank by walk distance.",
+        "zh": "输入学校/办公楼/区域，自动展开到周边地铁站并按步行距离排序。",
+    },
+    "features.nl.title": {
+        "en": "Natural Language (EN + 中文)",
+        "zh": "自然语言 (中英混合)",
+    },
+    "features.nl.desc": {
+        "en": "Mix English and Chinese, rough or precise. Supports price ranges, facing, floor, radius.",
+        "zh": "中英混合，模糊或精确都行。支持价格区间、朝向、楼层、距离。",
+    },
+    "features.data.title": {
+        "en": "Condo + HDB Data",
+        "zh": "公寓 + 组屋数据",
+    },
+    "features.data.desc": {
+        "en": "551 condo projects from URA + 200K+ HDB transactions from data.gov.sg. Updated quarterly / monthly.",
+        "zh": "URA 551 个公寓项目 + 20万+ HDB 租赁记录，季度/月度更新。",
+    },
+    "features.trend.title": {
+        "en": "Rent Trends (P25/P50/P75)",
+        "zh": "租金趋势 (P25/P50/P75)",
+    },
+    "features.trend.desc": {
+        "en": "Per-project 8-quarter history with P25 as a realistic negotiation target.",
+        "zh": "每个项目 8 个季度历史，P25 可作议价目标。",
+    },
+    "features.commute.title": {
+        "en": "Smart Commute Search",
+        "zh": "智能通勤搜索",
+    },
+    "features.commute.desc": {
+        "en": "Enter two locations (e.g. office + school) and find optimal rental areas between them.",
+        "zh": "输入两个位置（如办公室+学校），找夹在中间的最佳租房区域。",
+    },
+    "features.filter.title": {
+        "en": "Facing, Floor & Range Filters",
+        "zh": "朝向/楼层/价格区间筛选",
+    },
+    "features.filter.desc": {
+        "en": "Narrow by south-facing, high floor, exact price band, or custom radius from an MRT.",
+        "zh": "按朝南、高楼层、精确价格区间、自定义距 MRT 范围筛选。",
+    },
+
     # -- Welcome --
     "welcome.how_to": {
         "en": """### How to use

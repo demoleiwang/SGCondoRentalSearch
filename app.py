@@ -32,6 +32,7 @@ from scraper.hdb import (
 )
 from smart_search import expand_query, detect_landmark
 from i18n import t, get_lang, set_lang, bedroom_label
+import features_showcase
 
 # --- Page Config ---
 st.set_page_config(
@@ -680,6 +681,8 @@ if search_clicked or nl_query:
 
 else:
     # ======================== WELCOME ========================
+    features_showcase.render(expanded=True)
+
     st.markdown(t("welcome.how_to"))
 
     st.subheader(t("welcome.popular"))

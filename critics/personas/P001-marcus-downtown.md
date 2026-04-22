@@ -2,9 +2,9 @@
 id: P001
 name: Marcus Chen — Downtown Banker
 status: active
-created: 2026-04-22
-last_run: null
-runs: 0
+created: '2026-04-22'
+last_run: '2026-04-22'
+runs: 1
 archetype_axes:
   language: en-primary-zh-secondary
   budget: mid-flexible
@@ -49,4 +49,4 @@ archetype_axes:
 
 ## Lessons
 
-_(none yet)_
+- 2026-04-22: Synthetic-Marcus: commute time, lifestyle amenities, and P25-at-row-level are the three missing pieces that most hurt perceived value.

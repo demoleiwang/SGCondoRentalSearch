@@ -32,6 +32,7 @@ from scraper.hdb import (
 )
 from smart_search import expand_query, detect_landmark
 from i18n import t, get_lang, set_lang, bedroom_label
+import features_showcase
 
 # --- Page Config ---
 st.set_page_config(
@@ -174,6 +175,54 @@ url_pg = build_propertyguru_url(location=location_query)
 url_google = build_google_search_url(location=location_query)
 st.sidebar.markdown(f"[\U0001f517 PropertyGuru]({url_pg})")
 st.sidebar.markdown(f"[\U0001f50d Google Search]({url_google})")
+
+
+# =========================================================================
+# HELPER: Format a condo result row with P25/P75 + district comparison
+# =========================================================================
+def rent_row_markdown(
+    project_name: str,
+    est_rent: int,
+    est_rent_p25: int,
+    est_rent_p75: int,
+    district_median: int,
+    contracts: int,
+    url_pg: str,
+    url_g: str,
+) -> str:
+    """Build a compact two-line markdown block for one condo result.
+
+    Line 1: **Project** — $median/mo
+    Line 2: P25 target · P75 ceiling · vs-area badge · contracts · links
+    """
+    line1 = f"**{project_name}** — **${est_rent:,}/mo**"
+
+    parts: list[str] = []
+
+    if est_rent_p25 > 0:
+        parts.append(f"🎯 {t('row.p25')} **${est_rent_p25:,}**")
+    if est_rent_p75 > 0:
+        parts.append(f"{t('row.p75')} ${est_rent_p75:,}")
+
+    # vs-area badge (Streamlit color markdown)
+    if district_median > 0 and est_rent > 0:
+        pct = round((est_rent - district_median) / district_median * 100)
+        if pct <= -3:
+            parts.append(f":green[▼ {t('row.vs_district_below', pct=abs(pct))}]")
+        elif pct >= 3:
+            parts.append(f":orange[▲ {t('row.vs_district_above', pct=pct)}]")
+        else:
+            parts.append(f":gray[● {t('row.vs_district_at')}]")
+
+    if contracts:
+        parts.append(t("row.contracts_short", n=contracts))
+
+    parts.append(f"[PropertyGuru]({url_pg})")
+    if url_g:
+        parts.append(f"[Google]({url_g})")
+
+    line2 = " · ".join(parts)
+    return f"{line1}  \n{line2}"
 
 
 # =========================================================================
@@ -384,22 +433,32 @@ if search_clicked or nl_query:
                 # Show first 5 immediately
                 for r in strat_results[:5]:
                     url_g = build_google_search_url(project_name=r.project_name)
-                    st.markdown(
-                        f"**{r.project_name}** — ${r.est_rent:,}/mo "
-                        f"(${r.median_psf:.2f} psf, {r.contracts} contracts) "
-                        f"[PropertyGuru]({r.url_propertyguru}) | [Google]({url_g})"
-                    )
+                    st.markdown(rent_row_markdown(
+                        project_name=r.project_name,
+                        est_rent=r.est_rent,
+                        est_rent_p25=r.est_rent_p25,
+                        est_rent_p75=r.est_rent_p75,
+                        district_median=r.district_median_rent,
+                        contracts=r.contracts,
+                        url_pg=r.url_propertyguru,
+                        url_g=url_g,
+                    ))
                     render_trend_chart(r.project_name, bedrooms_smart)
                 # Remaining items in a nested expander so they are actually accessible
                 if len(strat_results) > 5:
                     with st.expander(t("smart.show_more", n=len(strat_results) - 5)):
                         for r in strat_results[5:]:
                             url_g = build_google_search_url(project_name=r.project_name)
-                            st.markdown(
-                                f"**{r.project_name}** — ${r.est_rent:,}/mo "
-                                f"(${r.median_psf:.2f} psf, {r.contracts} contracts) "
-                                f"[PropertyGuru]({r.url_propertyguru}) | [Google]({url_g})"
-                            )
+                            st.markdown(rent_row_markdown(
+                                project_name=r.project_name,
+                                est_rent=r.est_rent,
+                                est_rent_p25=r.est_rent_p25,
+                                est_rent_p75=r.est_rent_p75,
+                                district_median=r.district_median_rent,
+                                contracts=r.contracts,
+                                url_pg=r.url_propertyguru,
+                                url_g=url_g,
+                            ))
                             render_trend_chart(r.project_name, bedrooms_smart)
 
         with st.expander(f"\U0001f4ca {t('smart.full_table')}"):
@@ -531,21 +590,57 @@ if search_clicked or nl_query:
                         st.warning(t("result.no_condo"))
                     else:
                         typical_size = TYPICAL_SIZES.get(condo_bedrooms, 530)
+                        # Precompute district median rent for the "vs area" badge.
+                        district_median_rent_map = (
+                            filtered_condo.groupby("postal_district")[rent_col]
+                            .median().round(0).astype(int).to_dict()
+                        )
                         for _, row in filtered_condo.iterrows():
                             est_rent = int(row[rent_col])
+                            p25_psf = float(row.get("p25_psf", 0) or 0)
+                            p75_psf = float(row.get("p75_psf", 0) or 0)
+                            est_rent_p25 = int(round(p25_psf * typical_size)) if p25_psf else 0
+                            est_rent_p75 = int(round(p75_psf * typical_size)) if p75_psf else 0
+                            district_median = int(district_median_rent_map.get(int(row["postal_district"]), 0))
+
                             url_pgp = build_propertyguru_url(
                                 project_name=row["project_name"], bedrooms=condo_bedrooms,
                                 price_min=int(est_rent * 0.85), price_max=int(est_rent * 1.15),
                             )
                             url_gp = build_google_search_url(project_name=row["project_name"], bedrooms=condo_bedrooms)
+
+                            # Build vs-area badge text
+                            if district_median > 0:
+                                pct = round((est_rent - district_median) / district_median * 100)
+                                if pct <= -3:
+                                    vs_badge = f":green[▼ {t('row.vs_district_below', pct=abs(pct))}]"
+                                elif pct >= 3:
+                                    vs_badge = f":orange[▲ {t('row.vs_district_above', pct=pct)}]"
+                                else:
+                                    vs_badge = f":gray[● {t('row.vs_district_at')}]"
+                            else:
+                                vs_badge = ""
+
                             with st.container():
-                                c1, c2, c3 = st.columns([3, 2, 2])
+                                c1, c2, c3 = st.columns([3, 3, 2])
                                 with c1:
                                     st.markdown(f"**{row['project_name']}**")
-                                    st.caption(f"\U0001f4cd D{row['postal_district']} {row['district_area']} | \U0001f4dd {t('result.contracts', n=int(row['rental_contracts']))}")
+                                    st.caption(
+                                        f"\U0001f4cd D{row['postal_district']} {row['district_area']} "
+                                        f"| \U0001f4dd {t('result.contracts', n=int(row['rental_contracts']))}"
+                                    )
                                 with c2:
                                     st.markdown(f"### ${est_rent:,}/mo")
-                                    st.caption(f"Est. {condo_bedrooms}BR ({typical_size}sqft) | Median ${row['median_psf']:.2f} psf | P25-P75: ${row['p25_psf']:.2f}-${row['p75_psf']:.2f}")
+                                    target_parts = []
+                                    if est_rent_p25:
+                                        target_parts.append(f"🎯 {t('row.p25')} **${est_rent_p25:,}**")
+                                    if est_rent_p75:
+                                        target_parts.append(f"{t('row.p75')} ${est_rent_p75:,}")
+                                    if target_parts:
+                                        st.markdown(" · ".join(target_parts))
+                                    if vs_badge:
+                                        st.markdown(vs_badge)
+                                    st.caption(f"Est. {condo_bedrooms}BR ({typical_size}sqft) | Median ${row['median_psf']:.2f} psf")
                                 with c3:
                                     st.markdown(f"[PropertyGuru]({url_pgp}) | [Google]({url_gp})")
                                 # Trend chart for this project
@@ -680,6 +775,8 @@ if search_clicked or nl_query:
 
 else:
     # ======================== WELCOME ========================
+    features_showcase.render(expanded=True)
+
     st.markdown(t("welcome.how_to"))
 
     st.subheader(t("welcome.popular"))

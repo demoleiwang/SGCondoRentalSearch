@@ -37,16 +37,22 @@ def _cached_geocode(query: str) -> tuple[float, float] | None:
     return _geocode_cache[query]
 
 
-# Common Singapore landmarks that users might mention
+# Common Singapore landmarks that users might mention.
+# Keys are matched case-insensitively against the query string. Values are
+# passed to OneMap geocoding, so they should be searchable proper-name strings.
+# Includes Chinese-language synonyms and common shopping-mall / area names that
+# real users volunteer in queries (validated against a real user's tracker on
+# 2026-04-28, see critics/real-user/).
 LANDMARKS = {
-    # Universities
+    # ---- Universities ----
     "smu": "Singapore Management University",
     "nus": "National University of Singapore",
     "ntu": "Nanyang Technological University",
     "sutd": "Singapore University of Technology and Design",
     "sim": "Singapore Institute of Management",
     "sit": "Singapore Institute of Technology",
-    # Business areas
+
+    # ---- Business / office buildings ----
     "cbd": "Raffles Place Singapore",
     "marina bay financial centre": "Marina Bay Financial Centre",
     "mbfc": "Marina Bay Financial Centre",
@@ -55,15 +61,63 @@ LANDMARKS = {
     "one-north": "one-north Singapore",
     "changi business park": "Changi Business Park",
     "science park": "Singapore Science Park",
-    # Hospitals
+    "lazada one": "Lazada One Singapore 51 Bras Basah Road",
+    "google singapore": "Google Singapore Mapletree Business City",
+    "shopee": "Shopee Singapore Science Park",
+
+    # ---- Hospitals ----
     "sgh": "Singapore General Hospital",
     "nuh": "National University Hospital",
     "ttsh": "Tan Tock Seng Hospital",
-    # Others
+
+    # ---- Shopping / lifestyle districts (English) ----
     "orchard": "Orchard Road Singapore",
+    "great world": "Great World City",
+    "great world city": "Great World City",
+    "beauty world": "Beauty World MRT Singapore",
+    "holland village": "Holland Village Singapore",
+    "tiong bahru": "Tiong Bahru Singapore",
+    "dempsey": "Dempsey Hill Singapore",
+
+    # ---- Civic / central nodes (English) ----
+    "dhoby ghaut": "Dhoby Ghaut MRT Singapore",
+    "bras basah": "Bras Basah Singapore",
+    "city hall": "City Hall MRT Singapore",
+    "bugis": "Bugis Singapore",
+    "raffles place": "Raffles Place Singapore",
+    "tanjong pagar": "Tanjong Pagar Singapore",
+    "novena": "Novena Singapore",
+    "somerset": "Somerset Singapore",
+    "fort canning": "Fort Canning Singapore",
+
+    # ---- Chinese-language synonyms ----
+    # When users type Chinese place names (very common from local + mainland
+    # Chinese speakers), match the same physical location as the English keys.
+    "乌节路": "Orchard Road Singapore",
+    "牛车水": "Chinatown Singapore",
+    "多美歌": "Dhoby Ghaut MRT Singapore",
+    "富康宁": "Fort Canning Singapore",
+    "西海岸": "West Coast Singapore",
+    "金文泰": "Clementi Singapore",
+    "武吉知马": "Bukit Timah Singapore",
+    "花拉公园": "Farrer Park Singapore",
+    "如切": "Joo Chiat Singapore",
+    "东海岸": "East Coast Singapore",
+    "圣淘沙": "Sentosa Singapore",
+    "大巴窑": "Toa Payoh Singapore",
+    "宏茂桥": "Ang Mo Kio Singapore",
+    "碧山": "Bishan Singapore",
+    "义顺": "Yishun Singapore",
+    "兀兰": "Woodlands Singapore",
+    "淡滨尼": "Tampines Singapore",
+    "勿洛": "Bedok Singapore",
+
+    # ---- Recreation / iconic ----
     "sentosa": "Sentosa Singapore",
     "changi airport": "Changi Airport Singapore",
     "jewel": "Jewel Changi Airport",
+    "marina bay sands": "Marina Bay Sands Singapore",
+    "mbs": "Marina Bay Sands Singapore",
 }
 
 

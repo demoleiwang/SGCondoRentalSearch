@@ -85,7 +85,7 @@ def append_finding(f: Finding, backlog_path: Path) -> None:
 
 
 _LINE_RE = re.compile(
-    r"- \[ \] `(F\d+)` \((\d{4}-\d{2}-\d{2}), (P\d+)\) (.*?)\. Repro: (.*?)\. Source: (\S+)"
+    r"- \[ \] `(F\d+)` \((\d{4}-\d{2}-\d{2}), ([\w-]+)\) (.*?)\. Repro: (.*?)\. Source: (\S+)"
 )
 
 

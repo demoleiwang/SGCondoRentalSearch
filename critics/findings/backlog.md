@@ -13,7 +13,7 @@ New findings are appended below. Resolved findings move to `done.md`.
 - [ ] `F004` (2026-04-22, P001) Smart-search radius includes 1088m-away projects without a control to tighten to walkable-only. Repro: 2b2b near OUE Downtown 4500. Source: critics/sessions/2026-04-22-P001.md
 - [ ] `F006` (2026-04-22, P001) Features-showcase Smart Commute card advertises two-location search but Streamlit UI has no such input — clicking the example runs a normal query. Repro: click Smart Commute example. Source: critics/sessions/2026-04-22-P001-round2.md
 - [ ] `F011` (2026-04-28, real-user) Year built and remaining lease not shown — real shoppers manually annotate sidecar spreadsheets with TOP year + lease balance for every project. Repro: any rental query. Source: critics/real-user/2026-04-28-rental-tracker-analysis.md
-- [ ] `F016` (2026-04-28, real-user) Chinese landmark synonyms (富康宁, 多美歌, 牛车水, 乌节路, 西海岸) and mall/area names (Great World, Beauty World) missing from LANDMARKS dict — 7/7 user terms miss the dict. Repro: 富康宁 1br 3000 / great world 2br. Source: critics/real-user/2026-04-28-rental-tracker-analysis.md
+- [ ] `F017` (2026-04-28, real-user) Default ±10% price bracket on bare-number budgets is too tight for premium-district 1BR — Lazada One 1b1b 3500 returns zero results even though Sophia Hills (median 1BR $3,395) is in scope. Repro: Lazada One 1b1b 3500. Source: critics/real-user/2026-04-28-lazada-one-validation.md
 
 ## P2 — Nice-to-have
 
